@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import {
   Heart, MessageCircle, Send, LogOut, UserRound, Home, Search,
-  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare, Code2, Trash2, X, ChevronLeft, ChevronRight
+  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare, Code2, Trash2, X, ChevronLeft, ChevronRight, Bell, Bookmark, UserPlus
 } from "lucide-react";
 
 function AuthScreen() {
@@ -99,6 +99,12 @@ function App() {
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminPosts, setAdminPosts] = useState([]);
   const [adminStories, setAdminStories] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [savedPostIds, setSavedPostIds] = useState([]);
+  const [followingIds, setFollowingIds] = useState([]);
+  const [networkTab, setNetworkTab] = useState("followers");
+  const [networkPeople, setNetworkPeople] = useState([]);
   const [adminCounts, setAdminCounts] = useState({ users: 0, posts: 0, stories: 0 });
   const isAdmin = session?.user?.id === "7be4cd5a-f4fc-4157-864a-448a6d21bfb0";
 
@@ -121,6 +127,9 @@ function App() {
       loadPosts();
       loadFriendships();
       loadStories();
+      loadNotifications();
+      loadSavedPosts();
+      loadFollowing();
     } else {
       setPosts([]);
       setProfile(null);
@@ -300,6 +309,88 @@ function App() {
       likes: likesByPost[post.id] || [],
       comments: commentsByPost[post.id] || []
     })));
+  }
+
+  async function loadNotifications() {
+    if (!session?.user?.id) return;
+    const { data, error } = await supabase.from("notifications")
+      .select("id,actor_id,type,post_id,message,read,created_at")
+      .eq("user_id", session.user.id).order("created_at", { ascending: false }).limit(50);
+    if (error) { setNotice(`Notificações: ${error.message}`); return; }
+    const rows = data || [];
+    const actorIds = [...new Set(rows.map(item => item.actor_id).filter(Boolean))];
+    let actors = [];
+    if (actorIds.length) {
+      const result = await supabase.from("profiles").select("id,display_name,username,avatar_url").in("id", actorIds);
+      if (result.error) { setNotice(result.error.message); return; }
+      actors = result.data || [];
+    }
+    const byId = Object.fromEntries(actors.map(person => [person.id, person]));
+    setNotifications(rows.map(item => ({ ...item, actor: byId[item.actor_id] || null })));
+    setUnreadNotifications(rows.filter(item => !item.read).length);
+  }
+
+  async function openNotifications() {
+    setActivePage("notifications");
+    if (!session?.user?.id) return;
+    const { error } = await supabase.from("notifications").update({ read: true })
+      .eq("user_id", session.user.id).eq("read", false);
+    if (error) setNotice(error.message);
+    await loadNotifications();
+  }
+
+  async function loadSavedPosts() {
+    if (!session?.user?.id) return;
+    const { data, error } = await supabase.from("saved_posts").select("post_id").eq("user_id", session.user.id);
+    if (error) { setNotice(`Publicações salvas: ${error.message}`); return; }
+    setSavedPostIds((data || []).map(item => item.post_id));
+  }
+
+  async function toggleSavePost(postId) {
+    const saved = savedPostIds.includes(postId);
+    const result = saved
+      ? await supabase.from("saved_posts").delete().eq("user_id", session.user.id).eq("post_id", postId)
+      : await supabase.from("saved_posts").insert({ user_id: session.user.id, post_id: postId });
+    if (result.error) { setNotice(result.error.message); return; }
+    setSavedPostIds(current => saved ? current.filter(id => id !== postId) : [...current, postId]);
+    setNotice(saved ? "Publicação removida dos salvos." : "Publicação salva!");
+  }
+
+  async function loadFollowing() {
+    if (!session?.user?.id) return;
+    const { data, error } = await supabase.from("follows").select("following_id").eq("follower_id", session.user.id);
+    if (error) { setNotice(`Seguidores: ${error.message}`); return; }
+    setFollowingIds((data || []).map(item => item.following_id));
+  }
+
+  async function toggleFollow(personId) {
+    if (!personId || personId === session.user.id) return;
+    const alreadyFollowing = followingIds.includes(personId);
+    const result = alreadyFollowing
+      ? await supabase.from("follows").delete().eq("follower_id", session.user.id).eq("following_id", personId)
+      : await supabase.from("follows").insert({ follower_id: session.user.id, following_id: personId });
+    if (result.error) { setNotice(result.error.message); return; }
+    setFollowingIds(current => alreadyFollowing ? current.filter(id => id !== personId) : [...current, personId]);
+    setNotice(alreadyFollowing ? "Você deixou de seguir esta pessoa." : "Você começou a seguir esta pessoa!");
+    if (activePage === "network") loadNetworkPeople(networkTab);
+  }
+
+  async function loadNetworkPeople(tab = networkTab) {
+    setNetworkTab(tab);
+    const column = tab === "followers" ? "following_id" : "follower_id";
+    const match = tab === "followers" ? "follower_id" : "following_id";
+    const { data, error } = await supabase.from("follows").select("follower_id,following_id").eq(match, session.user.id);
+    if (error) { setNotice(error.message); return; }
+    const ids = (data || []).map(item => item[column]).filter(Boolean);
+    if (!ids.length) { setNetworkPeople([]); return; }
+    const result = await supabase.from("profiles").select("id,display_name,username,avatar_url").in("id", ids);
+    if (result.error) { setNotice(result.error.message); return; }
+    setNetworkPeople(result.data || []);
+  }
+
+  async function openNetwork(tab = "followers") {
+    setActivePage("network");
+    await loadNetworkPeople(tab);
   }
 
   async function loadFriendships() {
@@ -812,6 +903,9 @@ function App() {
         <button type="button" className={`nav-item ${activePage === "feed" ? "selected" : ""}`} onClick={() => setActivePage("feed")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Home size={19} /> Feed</button>
         <button type="button" className={`nav-item ${activePage === "profile" ? "selected" : ""}`} onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserRound size={19} /> Meu perfil</button>
         <button type="button" className={`nav-item ${activePage === "community" ? "selected" : ""}`} onClick={() => setActivePage("community")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Users size={19} /> Comunidade</button>
+        <button type="button" className={`nav-item ${activePage === "notifications" ? "selected" : ""}`} onClick={openNotifications} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left", position: "relative" }}><Bell size={19} /> Notificações {unreadNotifications > 0 && <span style={{ marginLeft: "auto", background: "#dc2626", color: "white", borderRadius: "99px", padding: "2px 7px", fontSize: "11px" }}>{unreadNotifications}</span>}</button>
+        <button type="button" className={`nav-item ${activePage === "network" ? "selected" : ""}`} onClick={() => openNetwork("followers")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserPlus size={19} /> Seguidores e seguindo</button>
+        <button type="button" className={`nav-item ${activePage === "saved" ? "selected" : ""}`} onClick={() => { setActivePage("saved"); loadSavedPosts(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Bookmark size={19} /> Publicações salvas</button>
         {isAdmin && <button type="button" className={`nav-item ${activePage === "admin" ? "selected" : ""}`} onClick={() => { setActivePage("admin"); setAdminTab("dashboard"); loadAdminData(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Code2 size={19} /> Painel ADM</button>}
         <button type="button" className={`nav-item ${activePage === "stories" ? "selected" : ""}`} onClick={() => { setActivePage("stories"); loadStories(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><ImageIcon size={19} /> Stories</button>
         <button type="button" className={`nav-item ${activePage === "messages" ? "selected" : ""}`} onClick={() => setActivePage("messages")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><MessageSquare size={19} /> Mensagem</button>
@@ -842,11 +936,27 @@ function App() {
                 {post.content && <p className="post-content">{post.content}</p>}
                 {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" onError={e => { e.currentTarget.style.display = "none"; }} />}
                 <div className="post-stats"><span>{post.likes?.length || 0} curtidas</span><span>{post.comments?.length || 0} comentários</span></div>
-                <div className="post-actions"><button className={liked ? "liked" : ""} onClick={() => toggleLike(post)}><Heart size={18} fill={liked ? "currentColor" : "none"} /> Curtir</button><button onClick={() => document.getElementById(`comment-${post.id}`)?.focus()}><MessageCircle size={18} /> Comentar</button></div>
+                <div className="post-actions"><button className={liked ? "liked" : ""} onClick={() => toggleLike(post)}><Heart size={18} fill={liked ? "currentColor" : "none"} /> Curtir</button><button onClick={() => document.getElementById(`comment-${post.id}`)?.focus()}><MessageCircle size={18} /> Comentar</button><button type="button" onClick={() => toggleSavePost(post.id)}><Bookmark size={17} fill={savedPostIds.includes(post.id) ? "currentColor" : "none"} /> {savedPostIds.includes(post.id) ? "Salva" : "Salvar"}</button></div>
                 {post.comments?.slice(-3).map(comment => <div className="comment" key={comment.id}>{comment.profiles?.id ? <button type="button" onClick={() => openUserProfile(comment.user_id)} style={{ border: 0, padding: 0, background: "transparent", color: "inherit", fontWeight: 700, cursor: "pointer" }}>{comment.profiles?.display_name || "Usuário"}</button> : <b>{comment.profiles?.display_name || "Usuário"}</b>} {comment.content}</div>)}
                 <div className="comment-entry"><input id={`comment-${post.id}`} value={commentDrafts[post.id] || ""} onChange={e => setCommentDrafts(value => ({ ...value, [post.id]: e.target.value }))} placeholder="Escreva um comentário…" /><button onClick={() => addComment(post.id)} aria-label="Enviar comentário"><Send size={17} /></button></div>
               </article>;
             })}
+        </>}
+
+        {activePage === "notifications" && <>
+          <div className="welcome"><div><span className="eyebrow">ATUALIZAÇÕES</span><h2>Notificações</h2><p>Veja quem interagiu com você no Conecta.</p></div><button className="icon-button" onClick={loadNotifications} title="Atualizar notificações"><RefreshCw size={18} /></button></div>
+          {notifications.length === 0 ? <div className="empty card"><h3>Nenhuma notificação ainda</h3><p>Quando alguém curtir, comentar, seguir você ou enviar uma mensagem, aparecerá aqui.</p></div> : <section className="card" style={{ padding: "12px 18px" }}>{notifications.map(item => <button key={item.id} type="button" onClick={() => item.post_id ? setActivePage("feed") : item.actor_id ? openUserProfile(item.actor_id) : null} style={{ display: "flex", alignItems: "center", gap: "12px", width: "100%", padding: "13px 4px", border: 0, borderBottom: "1px solid #e5e7eb", background: item.read ? "transparent" : "#eff6ff", textAlign: "left", cursor: "pointer", color: "inherit" }}><div className="avatar">{item.actor?.avatar_url ? <img src={item.actor.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (item.actor?.display_name || "C").slice(0,1).toUpperCase()}</div><span style={{ flex: 1 }}><b>{item.actor?.display_name || "Alguém"}</b> {item.message || "interagiu com você."}<small className="muted" style={{ display: "block", marginTop: "4px" }}>{new Date(item.created_at).toLocaleString("pt-BR")}</small></span>{!item.read && <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#2563eb" }} />}</button>)}</section>}
+        </>}
+
+        {activePage === "network" && <>
+          <div className="welcome"><div><span className="eyebrow">SUA REDE</span><h2>Seguidores e seguindo</h2><p>Acompanhe quem segue você e quem você acompanha.</p></div><button className="icon-button" onClick={() => loadNetworkPeople(networkTab)}><RefreshCw size={18} /></button></div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}><button type="button" className={networkTab === "followers" ? "primary" : "secondary"} onClick={() => loadNetworkPeople("followers")}>Seguidores</button><button type="button" className={networkTab === "following" ? "primary" : "secondary"} onClick={() => loadNetworkPeople("following")}>Seguindo</button></div>
+          <section className="card" style={{ padding: "16px 20px" }}>{networkPeople.length === 0 ? <p className="muted">{networkTab === "followers" ? "Você ainda não tem seguidores." : "Você ainda não segue ninguém."}</p> : networkPeople.map(person => <div key={person.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: "1px solid #e5e7eb" }}><button type="button" onClick={() => openUserProfile(person.id)} style={{ display: "flex", alignItems: "center", gap: 10, border: 0, padding: 0, background: "transparent", color: "inherit", cursor: "pointer", textAlign: "left" }}><div className="avatar">{person.avatar_url ? <img src={person.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (person.display_name || "C").slice(0,1).toUpperCase()}</div><span><b>{person.display_name || "Usuário Conecta"}</b><small className="muted" style={{ display: "block" }}>@{person.username || "usuario"}</small></span></button>{networkTab === "following" && <button type="button" className="secondary" onClick={() => toggleFollow(person.id)}>Deixar de seguir</button>}</div>)}</section>
+        </>}
+
+        {activePage === "saved" && <>
+          <div className="welcome"><div><span className="eyebrow">SUA COLEÇÃO</span><h2>Publicações salvas</h2><p>Publicações que você guardou para ver depois.</p></div><button className="icon-button" onClick={() => { loadSavedPosts(); loadPosts(); }}><RefreshCw size={18} /></button></div>
+          {posts.filter(post => savedPostIds.includes(post.id)).length === 0 ? <div className="empty card"><h3>Nenhuma publicação salva</h3><p>No Feed, toque em “Salvar” em uma publicação para guardá-la aqui.</p><button type="button" className="secondary" onClick={() => setActivePage("feed")}>Ir para o Feed</button></div> : posts.filter(post => savedPostIds.includes(post.id)).map(post => <article className="post card" key={post.id}><div className="post-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><div><b>{post.profiles?.display_name || "Usuário Conecta"}</b><small style={{ display: "block" }}>@{post.profiles?.username || "usuario"}</small></div><button type="button" className="secondary" onClick={() => toggleSavePost(post.id)}>Remover salvo</button></div>{post.content && <p className="post-content">{post.content}</p>}{post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" />}</article>)}
         </>}
 
         {activePage === "stories" && <>
@@ -880,6 +990,7 @@ function App() {
             <div style={{ display: "flex", gap: "22px", flexWrap: "wrap", borderTop: "1px solid #e5e7eb", marginTop: "18px", paddingTop: "14px" }}>
               <span><b>{myPosts.length}</b> publicação(ões)</span>
               <span><b>{acceptedFriendships.length}</b> amizade(s)</span>
+              <button type="button" className="secondary" onClick={() => openNetwork("followers")}><b>Ver seguidores e seguindo</b></button>
             </div>
           </section>
 
@@ -925,6 +1036,7 @@ function App() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "18px" }}>
+                <button type="button" className={followingIds.includes(viewedProfile.id) ? "secondary" : "primary"} onClick={() => toggleFollow(viewedProfile.id)}>{followingIds.includes(viewedProfile.id) ? "Deixar de seguir" : "Seguir"}</button>
                 {(() => {
                   const relation = friendships.find(item => (item.requester_id === session.user.id && item.receiver_id === viewedProfile.id) || (item.receiver_id === session.user.id && item.requester_id === viewedProfile.id));
                   if (!relation) return <button className="primary" type="button" disabled={friendBusy} onClick={() => sendFriendRequest(viewedProfile.id)}>Adicionar amigo</button>;

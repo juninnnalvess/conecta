@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import {
   Heart, MessageCircle, Send, LogOut, UserRound, Home, Search,
-  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare, Code2
+  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare, Code2, Trash2
 } from "lucide-react";
 
 function AuthScreen() {
@@ -471,6 +471,33 @@ function App() {
     setBusyPost(false);
   }
 
+  async function deletePost(postId) {
+    const confirmed = window.confirm("Tem certeza de que deseja apagar esta publicação? Esta ação não pode ser desfeita.");
+    if (!confirmed) return;
+
+    setNotice("");
+    const { data, error } = await supabase
+      .from("posts")
+      .delete()
+      .eq("id", postId)
+      .eq("user_id", session.user.id)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      setNotice(error.message);
+      return;
+    }
+    if (!data) {
+      setNotice("A publicação não foi apagada. Confira se a política de exclusão está configurada no Supabase.");
+      return;
+    }
+
+    setPosts(current => current.filter(post => post.id !== postId));
+    setViewedProfilePosts(current => current.filter(post => post.id !== postId));
+    setNotice("Publicação apagada com sucesso.");
+  }
+
   async function toggleLike(post) {
     const liked = post.likes?.some(item => item.user_id === session.user.id);
     const result = liked
@@ -575,7 +602,10 @@ function App() {
             visiblePosts.map(post => {
               const liked = post.likes?.some(item => item.user_id === session.user.id);
               return <article className="post card" key={post.id}>
-                <div className="post-head"><button type="button" onClick={() => openUserProfile(post.user_id)} style={{ display: "flex", alignItems: "center", gap: "10px", border: 0, padding: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer" }}><div className="avatar">{post.profiles?.avatar_url ? <img src={post.profiles.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (post.profiles?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{post.profiles?.display_name || "Usuário Conecta"}</b><small>@{post.profiles?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></button></div>
+                <div className="post-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                  <button type="button" onClick={() => openUserProfile(post.user_id)} style={{ display: "flex", alignItems: "center", gap: "10px", border: 0, padding: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer" }}><div className="avatar">{post.profiles?.avatar_url ? <img src={post.profiles.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (post.profiles?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{post.profiles?.display_name || "Usuário Conecta"}</b><small>@{post.profiles?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></button>
+                  {post.user_id === session.user.id && <button type="button" className="icon-button" title="Apagar publicação" aria-label="Apagar publicação" onClick={() => deletePost(post.id)} style={{ color: "#b42318", border: "1px solid #f1c7c4" }}><Trash2 size={17} /></button>}
+                </div>
                 {post.content && <p className="post-content">{post.content}</p>}
                 {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" onError={e => { e.currentTarget.style.display = "none"; }} />}
                 <div className="post-stats"><span>{post.likes?.length || 0} curtidas</span><span>{post.comments?.length || 0} comentários</span></div>
@@ -626,7 +656,7 @@ function App() {
 
           <div className="welcome"><div><span className="eyebrow">SUAS ATIVIDADES</span><h2>Minhas publicações</h2><p>Publicações que você compartilhou no Conecta.</p></div><button className="icon-button" onClick={loadPosts} title="Atualizar publicações"><RefreshCw size={18} /></button></div>
           {myPosts.length === 0 ? <div className="empty card"><h3>Você ainda não publicou</h3><p>Volte ao Feed para compartilhar sua primeira ideia.</p><button className="secondary" onClick={() => setActivePage("feed")}>Ir para o Feed</button></div> : myPosts.map(post => <article className="post card" key={post.id}>
-            <div className="post-head"><div className="avatar">{(profile?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{profile?.display_name || "Você"}</b><small>@{profile?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></div>
+            <div className="post-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}><div style={{ display: "flex", alignItems: "center", gap: "10px" }}><div className="avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="Sua foto" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{profile?.display_name || "Você"}</b><small>@{profile?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></div><button type="button" className="icon-button" title="Apagar publicação" aria-label="Apagar publicação" onClick={() => deletePost(post.id)} style={{ color: "#b42318", border: "1px solid #f1c7c4" }}><Trash2 size={17} /></button></div>
             {post.content && <p className="post-content">{post.content}</p>}
             {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" />}
             <div className="post-stats"><span>{post.likes?.length || 0} curtidas</span><span>{post.comments?.length || 0} comentários</span></div>

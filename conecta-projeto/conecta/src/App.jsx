@@ -813,7 +813,7 @@ function App() {
         <button type="button" className={`nav-item ${activePage === "profile" ? "selected" : ""}`} onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserRound size={19} /> Meu perfil</button>
         <button type="button" className={`nav-item ${activePage === "community" ? "selected" : ""}`} onClick={() => setActivePage("community")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Users size={19} /> Comunidade</button>
         {isAdmin && <button type="button" className={`nav-item ${activePage === "admin" ? "selected" : ""}`} onClick={() => { setActivePage("admin"); setAdminTab("dashboard"); loadAdminData(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Code2 size={19} /> Painel ADM</button>}
-        <button type="button" className={`nav-item ${activePage === "stories" ? "selected" : ""}`} onClick={() => { setActivePage("stories"); loadStories(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><ImageIcon size={19} /> Story</button>
+        <button type="button" className={`nav-item ${activePage === "stories" ? "selected" : ""}`} onClick={() => { setActivePage("stories"); loadStories(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><ImageIcon size={19} /> Stories</button>
         <button type="button" className={`nav-item ${activePage === "messages" ? "selected" : ""}`} onClick={() => setActivePage("messages")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><MessageSquare size={19} /> Mensagem</button>
         <button type="button" className="profile-mini" onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}>
           <div className="avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="Sua foto" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}</div>
@@ -851,7 +851,7 @@ function App() {
 
         {activePage === "stories" && <>
           <div className="welcome">
-            <div><span className="eyebrow">MOMENTOS</span><h2>Story</h2><p>Compartilhe fotos e momentos que ficam disponíveis por 24 horas.</p></div>
+            <div><span className="eyebrow">MOMENTOS</span><h2>Stories</h2><p>Compartilhe fotos e momentos que ficam disponíveis por 24 horas.</p></div>
             <button className="icon-button" type="button" onClick={loadStories} title="Atualizar Stories"><RefreshCw size={18} /></button>
           </div>
           {storiesPanel}

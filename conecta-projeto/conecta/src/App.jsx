@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import {
   Heart, MessageCircle, Send, LogOut, UserRound, Home, Search,
-  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare, Code2, Trash2
+  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare, Code2, Trash2, X, ChevronLeft, ChevronRight
 } from "lucide-react";
 
 function AuthScreen() {
@@ -89,6 +89,12 @@ function App() {
   const [messageDraft, setMessageDraft] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [stories, setStories] = useState([]);
+  const [storyContent, setStoryContent] = useState("");
+  const [storyImageUrl, setStoryImageUrl] = useState("");
+  const [storyBusy, setStoryBusy] = useState(false);
+  const [activeStoryUserId, setActiveStoryUserId] = useState(null);
+  const [activeStoryIndex, setActiveStoryIndex] = useState(0);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -108,6 +114,7 @@ function App() {
       loadProfile();
       loadPosts();
       loadFriendships();
+      loadStories();
     } else {
       setPosts([]);
       setProfile(null);
@@ -126,6 +133,90 @@ function App() {
     setProfileUsername(data?.username || "");
     setProfileBio(data?.bio || "");
     setProfileAvatarUrl(data?.avatar_url || "");
+  }
+
+  async function loadStories() {
+    const { data: storyRows, error } = await supabase
+      .from("stories")
+      .select("id,user_id,content,image_url,created_at,expires_at")
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: true })
+      .limit(200);
+
+    if (error) {
+      setNotice(`Não foi possível carregar os Stories: ${error.message}`);
+      return;
+    }
+
+    const rows = storyRows || [];
+    if (!rows.length) {
+      setStories([]);
+      return;
+    }
+
+    const userIds = [...new Set(rows.map(story => story.user_id).filter(Boolean))];
+    const { data: profileRows, error: profileError } = await supabase
+      .from("profiles")
+      .select("id,display_name,username,avatar_url")
+      .in("id", userIds);
+
+    if (profileError) {
+      setNotice(profileError.message);
+      return;
+    }
+
+    const profileById = Object.fromEntries((profileRows || []).map(person => [person.id, person]));
+    setStories(rows.map(story => ({ ...story, profiles: profileById[story.user_id] || null })));
+  }
+
+  async function createStory(event) {
+    event.preventDefault();
+    const text = storyContent.trim();
+    const image = storyImageUrl.trim();
+    if (!text && !image) {
+      setNotice("Escreva algo ou adicione o link de uma imagem para publicar seu Story.");
+      return;
+    }
+
+    setStoryBusy(true);
+    setNotice("");
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { error } = await supabase.from("stories").insert({
+      user_id: session.user.id,
+      content: text || null,
+      image_url: image || null,
+      expires_at: expiresAt
+    });
+
+    if (error) {
+      setNotice(error.message);
+    } else {
+      setStoryContent("");
+      setStoryImageUrl("");
+      setNotice("Story publicado! Ele ficará disponível por 24 horas.");
+      await loadStories();
+    }
+    setStoryBusy(false);
+  }
+
+  async function deleteStory(storyId) {
+    const confirmed = window.confirm("Apagar este Story?");
+    if (!confirmed) return;
+
+    const { error } = await supabase.from("stories")
+      .delete()
+      .eq("id", storyId)
+      .eq("user_id", session.user.id);
+
+    if (error) {
+      setNotice(error.message);
+      return;
+    }
+
+    setStories(current => current.filter(story => story.id !== storyId));
+    setNotice("Story apagado.");
+    const stillHasStories = stories.some(story => story.user_id === session.user.id && story.id !== storyId);
+    if (!stillHasStories) setActiveStoryUserId(null);
   }
 
   // Busca cada tabela separadamente para evitar relações ambíguas no Supabase.
@@ -552,6 +643,70 @@ function App() {
       (post.profiles?.display_name || "").toLowerCase().includes(query);
   }), [posts, search]);
 
+  const storyGroups = useMemo(() => {
+    const groups = new Map();
+    stories.forEach(story => {
+      if (!groups.has(story.user_id)) {
+        groups.set(story.user_id, {
+          userId: story.user_id,
+          profile: story.profiles,
+          items: []
+        });
+      }
+      groups.get(story.user_id).items.push(story);
+    });
+    return [...groups.values()].sort((a, b) => {
+      const aLast = a.items[a.items.length - 1]?.created_at || "";
+      const bLast = b.items[b.items.length - 1]?.created_at || "";
+      return new Date(bLast) - new Date(aLast);
+    });
+  }, [stories]);
+
+  const activeStoryGroup = storyGroups.find(group => group.userId === activeStoryUserId) || null;
+  const activeStory = activeStoryGroup?.items?.[activeStoryIndex] || null;
+
+  function openStoryGroup(userId) {
+    const group = storyGroups.find(item => item.userId === userId);
+    if (!group) return;
+    setActiveStoryUserId(userId);
+    setActiveStoryIndex(0);
+  }
+
+  function closeStoryViewer() {
+    setActiveStoryUserId(null);
+    setActiveStoryIndex(0);
+  }
+
+  function nextStory() {
+    if (!activeStoryGroup) return;
+    if (activeStoryIndex < activeStoryGroup.items.length - 1) {
+      setActiveStoryIndex(index => index + 1);
+      return;
+    }
+    const groupIndex = storyGroups.findIndex(group => group.userId === activeStoryUserId);
+    const nextGroup = storyGroups[groupIndex + 1];
+    if (nextGroup) {
+      setActiveStoryUserId(nextGroup.userId);
+      setActiveStoryIndex(0);
+    } else {
+      closeStoryViewer();
+    }
+  }
+
+  function previousStory() {
+    if (!activeStoryGroup) return;
+    if (activeStoryIndex > 0) {
+      setActiveStoryIndex(index => index - 1);
+      return;
+    }
+    const groupIndex = storyGroups.findIndex(group => group.userId === activeStoryUserId);
+    const previousGroup = storyGroups[groupIndex - 1];
+    if (previousGroup) {
+      setActiveStoryUserId(previousGroup.userId);
+      setActiveStoryIndex(previousGroup.items.length - 1);
+    }
+  }
+
   if (!isSupabaseConfigured) return <main className="setup-wrap"><section className="setup-card">
     <div className="brand-mark">C</div><h1>Vamos conectar o Conecta</h1>
     <p>O projeto está pronto para receber as credenciais do Supabase.</p>
@@ -593,7 +748,37 @@ function App() {
         {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
 
         {activePage === "feed" && <>
-          <div className="welcome"><div><span className="eyebrow">SUA COMUNIDADE</span><h2>O que está acontecendo?</h2><p>Compartilhe uma ideia com sua rede.</p></div><button className="icon-button" onClick={loadPosts} title="Atualizar feed"><RefreshCw size={18} /></button></div>
+          <section className="card" style={{ padding: "16px", marginBottom: "18px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+              <div><h3 style={{ margin: 0 }}>Stories</h3><small className="muted">Fotos e momentos que desaparecem em 24 horas.</small></div>
+              <button type="button" className="secondary" onClick={loadStories}><RefreshCw size={15} /> Atualizar</button>
+            </div>
+            <form onSubmit={createStory} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr) auto", gap: "8px", alignItems: "center", marginBottom: "14px" }}>
+              <input value={storyContent} onChange={event => setStoryContent(event.target.value)} placeholder="Escreva um momento..." maxLength={240} aria-label="Texto do Story" />
+              <input value={storyImageUrl} onChange={event => setStoryImageUrl(event.target.value)} placeholder="Link de imagem (opcional)" aria-label="Link de imagem do Story" />
+              <button className="primary" type="submit" disabled={storyBusy}>{storyBusy ? "Publicando..." : "Publicar Story"}</button>
+            </form>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "14px", overflowX: "auto", padding: "4px 2px 8px" }}>
+              {(() => {
+                const ownGroup = storyGroups.find(group => group.userId === session.user.id);
+                return <button type="button" onClick={() => ownGroup ? openStoryGroup(session.user.id) : document.querySelector('[aria-label="Texto do Story"]')?.focus()} style={{ flex: "0 0 76px", width: "76px", border: 0, padding: 0, background: "transparent", cursor: "pointer", color: "inherit", textAlign: "center" }}>
+                  <span style={{ display: "grid", placeItems: "center", width: "64px", height: "64px", margin: "0 auto 6px", borderRadius: "50%", border: "3px solid #2563eb", padding: "3px", background: "#fff" }}>
+                    <span style={{ display: "grid", placeItems: "center", width: "100%", height: "100%", borderRadius: "50%", overflow: "hidden", background: "#e8efff", color: "#2457a7", fontSize: "22px", fontWeight: 700 }}>{profile?.avatar_url ? <img src={profile.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}</span>
+                  </span>
+                  <small style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Seu Story</small>
+                  <small className="muted">{ownGroup ? "Ver" : "Criar"}</small>
+                </button>;
+              })()}
+              {storyGroups.filter(group => group.userId !== session.user.id).map(group => <button key={group.userId} type="button" onClick={() => openStoryGroup(group.userId)} style={{ flex: "0 0 76px", width: "76px", border: 0, padding: 0, background: "transparent", cursor: "pointer", color: "inherit", textAlign: "center" }}>
+                <span style={{ display: "grid", placeItems: "center", width: "64px", height: "64px", margin: "0 auto 6px", borderRadius: "50%", border: "3px solid #2563eb", padding: "3px", background: "#fff" }}>
+                  <span style={{ display: "grid", placeItems: "center", width: "100%", height: "100%", borderRadius: "50%", overflow: "hidden", background: "#e8efff", color: "#2457a7", fontSize: "22px", fontWeight: 700 }}>{group.profile?.avatar_url ? <img src={group.profile.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (group.profile?.display_name || "C").slice(0, 1).toUpperCase()}</span>
+                </span>
+                <small style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{group.profile?.display_name || "Usuário"}</small>
+              </button>)}
+              {storyGroups.length === 0 && <p className="muted" style={{ margin: "12px 0" }}>Ainda não há Stories de outras pessoas. Publique o primeiro!</p>}
+            </div>
+          </section>
+          <div className="welcome"><div><span className="eyebrow">SUA COMUNIDADE</span><h2>O que está acontecendo?</h2><p>Compartilhe uma ideia com sua rede.</p></div><button className="icon-button" onClick={() => { loadPosts(); loadStories(); }} title="Atualizar feed"><RefreshCw size={18} /></button></div>
           <form className="composer card" onSubmit={createPost}>
             <div className="composer-top"><div className="avatar">{(profile?.display_name || "C").slice(0, 1).toUpperCase()}</div><textarea value={content} onChange={e => setContent(e.target.value)} placeholder={`No que você está pensando, ${profile?.display_name || "amigo"}?`} rows={3} /></div>
             <div className="composer-bottom"><label className="image-input"><ImageIcon size={18} /> <input value={imageUrl} onChange={e => setImageUrl(e.target.value)} placeholder="Cole o link de uma imagem (opcional)" /></label><button className="primary" disabled={busyPost}>{busyPost ? "Publicando…" : <><Send size={16} /> Publicar</>}</button></div>
@@ -799,6 +984,25 @@ function App() {
         <section className="side-card tips"><h3>Bem-vindo ao Conecta</h3><p>Publique, curta e converse. Sua comunidade começa com uma conexão.</p></section>
       </aside>
     </div>
+    {activeStory && <div role="dialog" aria-modal="true" aria-label="Visualizador de Stories" onClick={closeStoryViewer} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(10, 15, 25, 0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+      <div onClick={event => event.stopPropagation()} style={{ position: "relative", width: "min(420px, 100%)", height: "min(760px, 88vh)", minHeight: "420px", borderRadius: "18px", overflow: "hidden", background: activeStory.image_url ? "#111827" : "linear-gradient(145deg, #1d4ed8, #7c3aed, #be185d)", color: "white", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,.4)" }}>
+        <div style={{ display: "flex", gap: "4px", padding: "12px 12px 8px" }}>{activeStoryGroup.items.map((item, index) => <span key={item.id} style={{ height: "3px", flex: 1, borderRadius: "4px", background: index <= activeStoryIndex ? "#fff" : "rgba(255,255,255,.35)" }} />)}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: "9px", padding: "4px 14px 12px" }}>
+          <div style={{ width: "34px", height: "34px", borderRadius: "50%", overflow: "hidden", background: "rgba(255,255,255,.2)", display: "grid", placeItems: "center", fontWeight: 700 }}>{activeStoryGroup.profile?.avatar_url ? <img src={activeStoryGroup.profile.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (activeStoryGroup.profile?.display_name || "C").slice(0, 1).toUpperCase()}</div>
+          <div style={{ flex: 1, minWidth: 0 }}><b>{activeStoryGroup.profile?.display_name || "Usuário Conecta"}</b><small style={{ display: "block", opacity: .75 }}>{new Date(activeStory.created_at).toLocaleString("pt-BR")}</small></div>
+          {activeStory.user_id === session.user.id && <button type="button" onClick={() => deleteStory(activeStory.id)} aria-label="Apagar Story" title="Apagar Story" style={{ border: 0, background: "rgba(255,255,255,.16)", color: "white", borderRadius: "8px", padding: "7px", cursor: "pointer" }}>Apagar</button>}
+          <button type="button" onClick={closeStoryViewer} aria-label="Fechar Story" style={{ border: 0, background: "rgba(255,255,255,.16)", color: "white", borderRadius: "8px", padding: "7px", cursor: "pointer" }}><X size={18} /></button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: "grid", placeItems: "center", position: "relative" }}>
+          {activeStory.image_url ? <img src={activeStory.image_url} alt="Story" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <div style={{ padding: "34px", textAlign: "center", fontSize: "clamp(24px, 5vw, 34px)", fontWeight: 700, overflowWrap: "anywhere" }}>{activeStory.content}</div>}
+          {activeStory.image_url && activeStory.content && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "22px 16px", background: "linear-gradient(transparent, rgba(0,0,0,.72))", textAlign: "center", fontSize: "20px", fontWeight: 600 }}>{activeStory.content}</div>}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "12px" }}>
+          <button type="button" onClick={previousStory} style={{ border: 0, background: "rgba(255,255,255,.16)", color: "white", borderRadius: "9px", padding: "9px 13px", cursor: "pointer" }}><ChevronLeft size={18} /> Anterior</button>
+          <button type="button" onClick={nextStory} style={{ border: 0, background: "rgba(255,255,255,.16)", color: "white", borderRadius: "9px", padding: "9px 13px", cursor: "pointer" }}>Próximo <ChevronRight size={18} /></button>
+        </div>
+      </div>
+    </div>}
   </div>;
 }
 

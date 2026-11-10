@@ -71,6 +71,11 @@ function App() {
   const [busyPost, setBusyPost] = useState(false);
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
+  const [peopleSearch, setPeopleSearch] = useState("");
+  const [people, setPeople] = useState([]);
+  const [friendships, setFriendships] = useState([]);
+  const [friendProfilesById, setFriendProfilesById] = useState({});
+  const [friendBusy, setFriendBusy] = useState(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -89,6 +94,7 @@ function App() {
     if (session?.user) {
       loadProfile();
       loadPosts();
+      loadFriendships();
     } else {
       setPosts([]);
       setProfile(null);
@@ -180,6 +186,119 @@ function App() {
       likes: likesByPost[post.id] || [],
       comments: commentsByPost[post.id] || []
     })));
+  }
+
+  async function loadFriendships() {
+    const userId = session?.user?.id;
+    if (!userId) return;
+
+    const { data, error } = await supabase
+      .from("friendships")
+      .select("id,requester_id,receiver_id,status,created_at")
+      .or(`requester_id.eq.${userId},receiver_id.eq.${userId}`)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setNotice(error.message);
+      return;
+    }
+
+    const rows = data || [];
+    setFriendships(rows);
+
+    const otherIds = [...new Set(rows.map(row =>
+      row.requester_id === userId ? row.receiver_id : row.requester_id
+    ).filter(Boolean))];
+
+    if (!otherIds.length) {
+      setFriendProfilesById({});
+      return;
+    }
+
+    const { data: profileRows, error: profileError } = await supabase
+      .from("profiles")
+      .select("id,display_name,username,avatar_url")
+      .in("id", otherIds);
+
+    if (profileError) {
+      setNotice(profileError.message);
+      return;
+    }
+
+    setFriendProfilesById(Object.fromEntries((profileRows || []).map(row => [row.id, row])));
+  }
+
+  async function searchPeople(e) {
+    e.preventDefault();
+    const term = peopleSearch.trim();
+    if (!term) {
+      setPeople([]);
+      setNotice("Digite um nome ou usuário para pesquisar.");
+      return;
+    }
+
+    setFriendBusy(true);
+    setNotice("");
+    const pattern = `%${term}%`;
+    const [byName, byUsername] = await Promise.all([
+      supabase.from("profiles")
+        .select("id,display_name,username,avatar_url")
+        .neq("id", session.user.id)
+        .ilike("display_name", pattern)
+        .limit(20),
+      supabase.from("profiles")
+        .select("id,display_name,username,avatar_url")
+        .neq("id", session.user.id)
+        .ilike("username", pattern)
+        .limit(20)
+    ]);
+
+    const error = byName.error || byUsername.error;
+    if (error) {
+      setNotice(error.message);
+      setPeople([]);
+    } else {
+      const unique = new Map();
+      [...(byName.data || []), ...(byUsername.data || [])].forEach(person => unique.set(person.id, person));
+      setPeople([...unique.values()]);
+      if (unique.size === 0) setNotice("Nenhuma pessoa encontrada. Tente outro nome ou usuário.");
+    }
+    setFriendBusy(false);
+  }
+
+  async function sendFriendRequest(receiverId) {
+    setFriendBusy(true);
+    setNotice("");
+    const { error } = await supabase.from("friendships").insert({
+      requester_id: session.user.id,
+      receiver_id: receiverId,
+      status: "pending"
+    });
+    if (error) {
+      setNotice(error.message);
+    } else {
+      setNotice("Solicitação de amizade enviada!");
+      await loadFriendships();
+    }
+    setFriendBusy(false);
+  }
+
+  async function respondToFriendRequest(friendshipId, status) {
+    setFriendBusy(true);
+    setNotice("");
+    const { error } = await supabase.from("friendships")
+      .update({ status })
+      .eq("id", friendshipId)
+      .eq("receiver_id", session.user.id)
+      .eq("status", "pending");
+
+    if (error) {
+      setNotice(error.message);
+    } else {
+      setNotice(status === "accepted" ? "Pedido de amizade aceito!" : "Pedido de amizade recusado.");
+      await loadFriendships();
+    }
+    setFriendBusy(false);
   }
 
   async function createPost(e) {
@@ -281,6 +400,66 @@ function App() {
       </aside>
       <main className="feed">
         <div className="welcome"><div><span className="eyebrow">SUA COMUNIDADE</span><h2>O que está acontecendo?</h2><p>Compartilhe uma ideia com sua rede.</p></div><button className="icon-button" onClick={loadPosts} title="Atualizar feed"><RefreshCw size={18} /></button></div>
+
+        <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
+          <h3 style={{ marginTop: 0 }}>Encontrar pessoas</h3>
+          <p className="muted">Pesquise pelo nome ou pelo nome de usuário para adicionar amigos.</p>
+          <form onSubmit={searchPeople} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <input
+              value={peopleSearch}
+              onChange={event => setPeopleSearch(event.target.value)}
+              placeholder="Nome ou @usuário"
+              aria-label="Pesquisar pessoas"
+              style={{ flex: "1 1 220px", minWidth: 0 }}
+            />
+            <button className="secondary" disabled={friendBusy}>{friendBusy ? "Aguarde…" : "Buscar pessoas"}</button>
+          </form>
+
+          {friendships.some(item => item.status === "pending" && item.receiver_id === session.user.id) && <div style={{ marginTop: "18px" }}>
+            <h4>Pedidos recebidos</h4>
+            {friendships.filter(item => item.status === "pending" && item.receiver_id === session.user.id).map(item => {
+              const person = friendProfilesById[item.requester_id];
+              return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+                <div><b>{person?.display_name || "Usuário Conecta"}</b><div className="muted">@{person?.username || "usuario"}</div></div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <button type="button" className="primary" disabled={friendBusy} onClick={() => respondToFriendRequest(item.id, "accepted")}>Aceitar</button>
+                  <button type="button" className="secondary" disabled={friendBusy} onClick={() => respondToFriendRequest(item.id, "rejected")}>Recusar</button>
+                </div>
+              </div>;
+            })}
+          </div>}
+
+          {people.length > 0 && <div style={{ marginTop: "18px" }}>
+            <h4>Resultados da busca</h4>
+            {people.map(person => {
+              const relation = friendships.find(item =>
+                (item.requester_id === session.user.id && item.receiver_id === person.id) ||
+                (item.receiver_id === session.user.id && item.requester_id === person.id)
+              );
+              let action;
+              if (!relation) {
+                action = <button type="button" className="primary" disabled={friendBusy} onClick={() => sendFriendRequest(person.id)}>Adicionar amigo</button>;
+              } else if (relation.status === "accepted") {
+                action = <span className="muted">Vocês são amigos</span>;
+              } else if (relation.status === "pending" && relation.requester_id === session.user.id) {
+                action = <span className="muted">Solicitação enviada</span>;
+              } else if (relation.status === "pending") {
+                action = <span className="muted">Enviou um pedido para você</span>;
+              } else {
+                action = <span className="muted">Pedido encerrado</span>;
+              }
+              return <div key={person.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+                <div><b>{person.display_name || "Usuário Conecta"}</b><div className="muted">@{person.username || "usuario"}</div></div>
+                {action}
+              </div>;
+            })}
+          </div>}
+
+          <div style={{ marginTop: "14px", fontSize: "13px" }} className="muted">
+            {friendships.filter(item => item.status === "accepted").length} amizade(s) aceita(s)
+          </div>
+        </section>
+
         <form className="composer card" onSubmit={createPost}>
           <div className="composer-top"><div className="avatar">{(profile?.display_name || "C").slice(0, 1).toUpperCase()}</div><textarea value={content} onChange={e => setContent(e.target.value)} placeholder={`No que você está pensando, ${profile?.display_name || "amigo"}?`} rows={3} /></div>
           <div className="composer-bottom"><label className="image-input"><ImageIcon size={18} /> <input value={imageUrl} onChange={e => setImageUrl(e.target.value)} placeholder="Cole o link de uma imagem (opcional)" /></label><button className="primary" disabled={busyPost}>{busyPost ? "Publicando…" : <><Send size={16} /> Publicar</>}</button></div>

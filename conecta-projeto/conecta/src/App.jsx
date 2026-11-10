@@ -726,28 +726,7 @@ function App() {
   const acceptedFriendships = friendships.filter(item => item.status === "accepted");
   const incomingRequests = friendships.filter(item => item.status === "pending" && item.receiver_id === session.user.id);
 
-  return <div className="app-shell">
-    <header className="topbar">
-      <a className="wordmark" href="#" onClick={event => { event.preventDefault(); setActivePage("feed"); }}><span className="brand-mark small">C</span> Conecta</a>
-      <div className="searchbox"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar no Conecta" /></div>
-      <button className="icon-button" title="Sair" onClick={() => supabase.auth.signOut()}><LogOut size={19} /></button>
-    </header>
-    <div className="layout">
-      <aside className="left-nav">
-        <button type="button" className={`nav-item ${activePage === "feed" ? "selected" : ""}`} onClick={() => setActivePage("feed")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Home size={19} /> Feed</button>
-        <button type="button" className={`nav-item ${activePage === "profile" ? "selected" : ""}`} onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserRound size={19} /> Meu perfil</button>
-        <button type="button" className={`nav-item ${activePage === "community" ? "selected" : ""}`} onClick={() => setActivePage("community")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Users size={19} /> Comunidade</button>
-        <button type="button" className={`nav-item ${activePage === "messages" ? "selected" : ""}`} onClick={() => setActivePage("messages")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><MessageSquare size={19} /> Mensagem</button>
-        <button type="button" className="profile-mini" onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}>
-          <div className="avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="Sua foto" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}</div>
-          <div><b>{profile?.display_name || "Meu perfil"}</b><small>@{profile?.username || "usuario"}</small></div>
-        </button>
-      </aside>
-
-      <main className="feed">
-        {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
-
-        {activePage === "feed" && <>
+  const storiesPanel = (
           <section className="card" style={{ padding: "16px", marginBottom: "18px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
               <div><h3 style={{ margin: 0 }}>Stories</h3><small className="muted">Fotos e momentos que desaparecem em 24 horas.</small></div>
@@ -778,6 +757,32 @@ function App() {
               {storyGroups.length === 0 && <p className="muted" style={{ margin: "12px 0" }}>Ainda não há Stories de outras pessoas. Publique o primeiro!</p>}
             </div>
           </section>
+  );
+
+  return <div className="app-shell">
+    <header className="topbar">
+      <a className="wordmark" href="#" onClick={event => { event.preventDefault(); setActivePage("feed"); }}><span className="brand-mark small">C</span> Conecta</a>
+      <div className="searchbox"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar no Conecta" /></div>
+      <button className="icon-button" title="Sair" onClick={() => supabase.auth.signOut()}><LogOut size={19} /></button>
+    </header>
+    <div className="layout">
+      <aside className="left-nav">
+        <button type="button" className={`nav-item ${activePage === "feed" ? "selected" : ""}`} onClick={() => setActivePage("feed")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Home size={19} /> Feed</button>
+        <button type="button" className={`nav-item ${activePage === "profile" ? "selected" : ""}`} onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserRound size={19} /> Meu perfil</button>
+        <button type="button" className={`nav-item ${activePage === "community" ? "selected" : ""}`} onClick={() => setActivePage("community")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Users size={19} /> Comunidade</button>
+        <button type="button" className={`nav-item ${activePage === "stories" ? "selected" : ""}`} onClick={() => { setActivePage("stories"); loadStories(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><ImageIcon size={19} /> Story</button>
+        <button type="button" className={`nav-item ${activePage === "messages" ? "selected" : ""}`} onClick={() => setActivePage("messages")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><MessageSquare size={19} /> Mensagem</button>
+        <button type="button" className="profile-mini" onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}>
+          <div className="avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="Sua foto" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}</div>
+          <div><b>{profile?.display_name || "Meu perfil"}</b><small>@{profile?.username || "usuario"}</small></div>
+        </button>
+      </aside>
+
+      <main className="feed">
+        {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
+
+        {activePage === "feed" && <>
+          {storiesPanel}
           <div className="welcome"><div><span className="eyebrow">SUA COMUNIDADE</span><h2>O que está acontecendo?</h2><p>Compartilhe uma ideia com sua rede.</p></div><button className="icon-button" onClick={() => { loadPosts(); loadStories(); }} title="Atualizar feed"><RefreshCw size={18} /></button></div>
           <form className="composer card" onSubmit={createPost}>
             <div className="composer-top"><div className="avatar">{(profile?.display_name || "C").slice(0, 1).toUpperCase()}</div><textarea value={content} onChange={e => setContent(e.target.value)} placeholder={`No que você está pensando, ${profile?.display_name || "amigo"}?`} rows={3} /></div>
@@ -799,6 +804,14 @@ function App() {
                 <div className="comment-entry"><input id={`comment-${post.id}`} value={commentDrafts[post.id] || ""} onChange={e => setCommentDrafts(value => ({ ...value, [post.id]: e.target.value }))} placeholder="Escreva um comentário…" /><button onClick={() => addComment(post.id)} aria-label="Enviar comentário"><Send size={17} /></button></div>
               </article>;
             })}
+        </>}
+
+        {activePage === "stories" && <>
+          <div className="welcome">
+            <div><span className="eyebrow">MOMENTOS</span><h2>Story</h2><p>Compartilhe fotos e momentos que ficam disponíveis por 24 horas.</p></div>
+            <button className="icon-button" type="button" onClick={loadStories} title="Atualizar Stories"><RefreshCw size={18} /></button>
+          </div>
+          {storiesPanel}
         </>}
 
         {activePage === "profile" && <>

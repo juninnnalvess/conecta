@@ -860,6 +860,44 @@ function App() {
     const userId = session?.user?.id;
     if (!userId || !friendId) return;
 
+
+  useEffect(() => {
+    const userId = session?.user?.id;
+    const friendId = selectedChatFriend?.id;
+
+    if (!userId || !friendId) return;
+
+    const channel = supabase
+      .channel(`mensagens-${userId}-${friendId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages"
+        },
+        (payload) => {
+          const message = payload.new;
+
+          const belongsToConversation =
+            (message.sender_id === userId &&
+              message.receiver_id === friendId) ||
+            (message.sender_id === friendId &&
+              message.receiver_id === userId);
+
+          if (belongsToConversation) {
+            loadChatMessages(friendId);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id, selectedChatFriend?.id]);
+
+    
     setChatLoading(true);
 
     const [sent, received] = await Promise.all([

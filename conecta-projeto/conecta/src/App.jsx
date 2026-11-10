@@ -70,6 +70,9 @@ function App() {
   const [profileUsername, setProfileUsername] = useState("");
   const [profileBio, setProfileBio] = useState("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
+  const [viewedProfile, setViewedProfile] = useState(null);
+  const [viewedProfilePosts, setViewedProfilePosts] = useState([]);
+  const [viewedProfileLoading, setViewedProfileLoading] = useState(false);
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [commentDrafts, setCommentDrafts] = useState({});
@@ -376,6 +379,78 @@ function App() {
     setSendingMessage(false);
   }
 
+  async function openUserProfile(userId) {
+    if (!userId) return;
+    if (userId === session.user.id) {
+      setActivePage("profile");
+      return;
+    }
+
+    setActivePage("userProfile");
+    setViewedProfile(null);
+    setViewedProfilePosts([]);
+    setViewedProfileLoading(true);
+    setNotice("");
+
+    const { data: person, error: profileError } = await supabase
+      .from("profiles")
+      .select("id,display_name,username,bio,avatar_url")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError || !person) {
+      setNotice(profileError?.message || "Não foi possível encontrar esse perfil.");
+      setViewedProfileLoading(false);
+      return;
+    }
+
+    setViewedProfile(person);
+
+    const { data: personPosts, error: postsError } = await supabase
+      .from("posts")
+      .select("id,user_id,content,image_url,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (postsError) {
+      setNotice(postsError.message);
+      setViewedProfileLoading(false);
+      return;
+    }
+
+    const rows = personPosts || [];
+    if (!rows.length) {
+      setViewedProfilePosts([]);
+      setViewedProfileLoading(false);
+      return;
+    }
+
+    const postIds = rows.map(post => post.id);
+    const [{ data: likes, error: likesError }, { data: comments, error: commentsError }] = await Promise.all([
+      supabase.from("likes").select("post_id").in("post_id", postIds),
+      supabase.from("comments").select("post_id").in("post_id", postIds)
+    ]);
+
+    if (likesError || commentsError) {
+      setNotice((likesError || commentsError).message);
+      setViewedProfileLoading(false);
+      return;
+    }
+
+    const likeCounts = {};
+    const commentCounts = {};
+    (likes || []).forEach(item => { likeCounts[item.post_id] = (likeCounts[item.post_id] || 0) + 1; });
+    (comments || []).forEach(item => { commentCounts[item.post_id] = (commentCounts[item.post_id] || 0) + 1; });
+
+    setViewedProfilePosts(rows.map(post => ({
+      ...post,
+      likesCount: likeCounts[post.id] || 0,
+      commentsCount: commentCounts[post.id] || 0
+    })));
+    setViewedProfileLoading(false);
+  }
+
   async function createPost(e) {
     e.preventDefault();
     if (!content.trim() && !imageUrl.trim()) return;
@@ -500,12 +575,12 @@ function App() {
             visiblePosts.map(post => {
               const liked = post.likes?.some(item => item.user_id === session.user.id);
               return <article className="post card" key={post.id}>
-                <div className="post-head"><div className="avatar">{(post.profiles?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{post.profiles?.display_name || "Usuário Conecta"}</b><small>@{post.profiles?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></div>
+                <div className="post-head"><button type="button" onClick={() => openUserProfile(post.user_id)} style={{ display: "flex", alignItems: "center", gap: "10px", border: 0, padding: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer" }}><div className="avatar">{post.profiles?.avatar_url ? <img src={post.profiles.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (post.profiles?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{post.profiles?.display_name || "Usuário Conecta"}</b><small>@{post.profiles?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></button></div>
                 {post.content && <p className="post-content">{post.content}</p>}
                 {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" onError={e => { e.currentTarget.style.display = "none"; }} />}
                 <div className="post-stats"><span>{post.likes?.length || 0} curtidas</span><span>{post.comments?.length || 0} comentários</span></div>
                 <div className="post-actions"><button className={liked ? "liked" : ""} onClick={() => toggleLike(post)}><Heart size={18} fill={liked ? "currentColor" : "none"} /> Curtir</button><button onClick={() => document.getElementById(`comment-${post.id}`)?.focus()}><MessageCircle size={18} /> Comentar</button></div>
-                {post.comments?.slice(-3).map(comment => <div className="comment" key={comment.id}><b>{comment.profiles?.display_name || "Usuário"} </b>{comment.content}</div>)}
+                {post.comments?.slice(-3).map(comment => <div className="comment" key={comment.id}>{comment.profiles?.id ? <button type="button" onClick={() => openUserProfile(comment.user_id)} style={{ border: 0, padding: 0, background: "transparent", color: "inherit", fontWeight: 700, cursor: "pointer" }}>{comment.profiles?.display_name || "Usuário"}</button> : <b>{comment.profiles?.display_name || "Usuário"}</b>} {comment.content}</div>)}
                 <div className="comment-entry"><input id={`comment-${post.id}`} value={commentDrafts[post.id] || ""} onChange={e => setCommentDrafts(value => ({ ...value, [post.id]: e.target.value }))} placeholder="Escreva um comentário…" /><button onClick={() => addComment(post.id)} aria-label="Enviar comentário"><Send size={17} /></button></div>
               </article>;
             })}
@@ -558,6 +633,47 @@ function App() {
           </article>)}
         </>}
 
+        {activePage === "userProfile" && <>
+          <div className="welcome">
+            <div><span className="eyebrow">PERFIL PÚBLICO</span><h2>Perfil de {viewedProfile?.display_name || "usuário"}</h2><p>Veja as informações e publicações desta pessoa.</p></div>
+            <button className="secondary" type="button" onClick={() => setActivePage("community")}>Voltar à comunidade</button>
+          </div>
+          {viewedProfileLoading ? <div className="empty card"><LoaderCircle className="spin" /> Carregando perfil…</div> : !viewedProfile ? <div className="empty card"><h3>Perfil indisponível</h3><p>Não foi possível carregar este perfil.</p><button className="secondary" onClick={() => setActivePage("community")}>Voltar</button></div> : <>
+            <section className="card" style={{ padding: "22px", marginBottom: "18px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
+                <div className="avatar" style={{ width: "84px", height: "84px", fontSize: "30px", flexShrink: 0 }}>
+                  {viewedProfile.avatar_url ? <img src={viewedProfile.avatar_url} alt={`Foto de ${viewedProfile.display_name || "usuário"}`} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (viewedProfile.display_name || "C").slice(0, 1).toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap", marginBottom: "4px" }}>
+                    <h2 style={{ margin: 0 }}>{viewedProfile.display_name || "Usuário Conecta"}</h2>
+                    {viewedProfile.username?.toLowerCase() === "usuario_7be4cd5a" && <span title="Identificação de desenvolvedor" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "5px 10px", borderRadius: "999px", background: "#eaf2ff", color: "#2457a7", border: "1px solid #c9dcff", fontSize: "12px", fontWeight: 700, lineHeight: 1 }}><Code2 size={14} /> Desenvolvedor</span>}
+                  </div>
+                  <p className="muted" style={{ margin: "0 0 8px" }}>@{viewedProfile.username || "usuario"}</p>
+                  <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{viewedProfile.bio || "Esta pessoa ainda não adicionou uma biografia."}</p>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "18px" }}>
+                {(() => {
+                  const relation = friendships.find(item => (item.requester_id === session.user.id && item.receiver_id === viewedProfile.id) || (item.receiver_id === session.user.id && item.requester_id === viewedProfile.id));
+                  if (!relation) return <button className="primary" type="button" disabled={friendBusy} onClick={() => sendFriendRequest(viewedProfile.id)}>Adicionar amigo</button>;
+                  if (relation.status === "accepted") return <button className="secondary" type="button" onClick={async () => { setActivePage("messages"); await openChat(viewedProfile.id); }}>Enviar mensagem</button>;
+                  if (relation.status === "pending" && relation.requester_id === session.user.id) return <span className="muted">Solicitação enviada</span>;
+                  if (relation.status === "pending") return <span className="muted">Esta pessoa enviou uma solicitação para você. Veja em Comunidade.</span>;
+                  return <button className="primary" type="button" disabled={friendBusy} onClick={() => sendFriendRequest(viewedProfile.id)}>Adicionar amigo</button>;
+                })()}
+              </div>
+            </section>
+            <div className="welcome"><div><span className="eyebrow">ATIVIDADES</span><h2>Publicações de {viewedProfile.display_name || "usuário"}</h2><p>Conteúdos compartilhados neste perfil.</p></div></div>
+            {viewedProfilePosts.length === 0 ? <div className="empty card"><h3>Nenhuma publicação ainda</h3><p>Quando esta pessoa publicar, o conteúdo aparecerá aqui.</p></div> : viewedProfilePosts.map(post => <article className="post card" key={post.id}>
+              <div className="post-head"><div className="avatar">{viewedProfile.avatar_url ? <img src={viewedProfile.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (viewedProfile.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{viewedProfile.display_name || "Usuário Conecta"}</b><small>@{viewedProfile.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></div>
+              {post.content && <p className="post-content">{post.content}</p>}
+              {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" />}
+              <div className="post-stats"><span>{post.likesCount} curtidas</span><span>{post.commentsCount} comentários</span></div>
+            </article>)}
+          </>}
+        </>}
+
         {activePage === "community" && <>
           <div className="welcome"><div><span className="eyebrow">CONECTE-SE</span><h2>Comunidade</h2><p>Encontre pessoas, envie solicitações e gerencie suas amizades.</p></div><button className="icon-button" onClick={() => { loadFriendships(); }} title="Atualizar comunidade"><RefreshCw size={18} /></button></div>
           <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
@@ -587,7 +703,7 @@ function App() {
                 else if (relation.status === "pending" && relation.requester_id === session.user.id) action = <span className="muted">Solicitação enviada</span>;
                 else if (relation.status === "pending") action = <span className="muted">Enviou um pedido para você</span>;
                 else action = <span className="muted">Pedido encerrado</span>;
-                return <div key={person.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><b>{person.display_name || "Usuário Conecta"}</b><div className="muted">@{person.username || "usuario"}</div></div>{action}</div>;
+                return <div key={person.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><button type="button" onClick={() => openUserProfile(person.id)} style={{ border: 0, padding: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer" }}><b>{person.display_name || "Usuário Conecta"}</b><div className="muted">@{person.username || "usuario"}</div></button><div><button type="button" className="secondary" style={{ marginTop: "6px", padding: "5px 9px", fontSize: "12px" }} onClick={() => openUserProfile(person.id)}>Ver perfil</button></div></div>{action}</div>;
               })}
             </div>}
           </section>
@@ -598,7 +714,7 @@ function App() {
               const friendId = item.requester_id === session.user.id ? item.receiver_id : item.requester_id;
               const friend = friendProfilesById[friendId];
               if (!friend) return null;
-              return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><b>{friend.display_name || "Usuário Conecta"}</b><div className="muted">@{friend.username || "usuario"}</div></div><button className="secondary" type="button" onClick={() => { setActivePage("messages"); openChat(friendId); }}>Conversar</button></div>;
+              return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><button type="button" onClick={() => openUserProfile(friendId)} style={{ border: 0, padding: 0, background: "transparent", color: "inherit", textAlign: "left", cursor: "pointer" }}><b>{friend.display_name || "Usuário Conecta"}</b><div className="muted">@{friend.username || "usuario"}</div></button><div><button type="button" className="secondary" style={{ marginTop: "6px", padding: "5px 9px", fontSize: "12px" }} onClick={() => openUserProfile(friendId)}>Ver perfil</button></div></div><button className="secondary" type="button" onClick={() => { setActivePage("messages"); openChat(friendId); }}>Conversar</button></div>;
             })}
           </section>
 

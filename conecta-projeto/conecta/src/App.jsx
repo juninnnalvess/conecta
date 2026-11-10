@@ -95,6 +95,12 @@ function App() {
   const [storyBusy, setStoryBusy] = useState(false);
   const [activeStoryUserId, setActiveStoryUserId] = useState(null);
   const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const [adminTab, setAdminTab] = useState("dashboard");
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminPosts, setAdminPosts] = useState([]);
+  const [adminStories, setAdminStories] = useState([]);
+  const [adminCounts, setAdminCounts] = useState({ users: 0, posts: 0, stories: 0 });
+  const isAdmin = session?.user?.id === "7be4cd5a-f4fc-4157-864a-448a6d21bfb0";
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -542,6 +548,42 @@ function App() {
     setViewedProfileLoading(false);
   }
 
+  async function loadAdminData() {
+    if (!isAdmin) return;
+    const [usersResult, postsResult, storiesResult, usersCount, postsCount, storiesCount] = await Promise.all([
+      supabase.from("profiles").select("id,display_name,username,avatar_url").order("display_name").limit(200),
+      supabase.from("posts").select("id,user_id,content,image_url,created_at").order("created_at", { ascending: false }).limit(100),
+      supabase.from("stories").select("id,user_id,content,image_url,created_at,expires_at").order("created_at", { ascending: false }).limit(100),
+      supabase.from("profiles").select("id", { count: "exact", head: true }),
+      supabase.from("posts").select("id", { count: "exact", head: true }),
+      supabase.from("stories").select("id", { count: "exact", head: true })
+    ]);
+    const failed = [usersResult, postsResult, storiesResult, usersCount, postsCount, storiesCount].find(result => result.error);
+    if (failed) { setNotice(`Erro ao carregar o Painel ADM: ${failed.error.message}`); return; }
+    setAdminUsers(usersResult.data || []);
+    setAdminPosts(postsResult.data || []);
+    setAdminStories(storiesResult.data || []);
+    setAdminCounts({ users: usersCount.count || 0, posts: postsCount.count || 0, stories: storiesCount.count || 0 });
+  }
+
+  async function adminDeletePost(id) {
+    if (!isAdmin || !window.confirm("Apagar esta publicação de forma permanente?")) return;
+    const { data, error } = await supabase.from("posts").delete().eq("id", id).select("id").maybeSingle();
+    if (error) { setNotice(`Não foi possível apagar: ${error.message}`); return; }
+    if (!data) { setNotice("A publicação não foi apagada. Verifique as políticas de administrador no Supabase."); return; }
+    setNotice("Publicação apagada.");
+    await Promise.all([loadAdminData(), loadPosts()]);
+  }
+
+  async function adminDeleteStory(id) {
+    if (!isAdmin || !window.confirm("Apagar este Story de forma permanente?")) return;
+    const { data, error } = await supabase.from("stories").delete().eq("id", id).select("id").maybeSingle();
+    if (error) { setNotice(`Não foi possível apagar: ${error.message}`); return; }
+    if (!data) { setNotice("O Story não foi apagado. Verifique as políticas de administrador no Supabase."); return; }
+    setNotice("Story apagado.");
+    await Promise.all([loadAdminData(), loadStories()]);
+  }
+
   async function createPost(e) {
     e.preventDefault();
     if (!content.trim() && !imageUrl.trim()) return;
@@ -770,6 +812,7 @@ function App() {
         <button type="button" className={`nav-item ${activePage === "feed" ? "selected" : ""}`} onClick={() => setActivePage("feed")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Home size={19} /> Feed</button>
         <button type="button" className={`nav-item ${activePage === "profile" ? "selected" : ""}`} onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserRound size={19} /> Meu perfil</button>
         <button type="button" className={`nav-item ${activePage === "community" ? "selected" : ""}`} onClick={() => setActivePage("community")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Users size={19} /> Comunidade</button>
+        {isAdmin && <button type="button" className={`nav-item ${activePage === "admin" ? "selected" : ""}`} onClick={() => { setActivePage("admin"); setAdminTab("dashboard"); loadAdminData(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Code2 size={19} /> Painel ADM</button>}
         <button type="button" className={`nav-item ${activePage === "stories" ? "selected" : ""}`} onClick={() => { setActivePage("stories"); loadStories(); }} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><ImageIcon size={19} /> Story</button>
         <button type="button" className={`nav-item ${activePage === "messages" ? "selected" : ""}`} onClick={() => setActivePage("messages")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><MessageSquare size={19} /> Mensagem</button>
         <button type="button" className="profile-mini" onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}>
@@ -980,6 +1023,21 @@ function App() {
               </div>
             )}
           </section>
+        </>}
+        {activePage === "admin" && isAdmin && <>
+          <div className="welcome"><div><span className="eyebrow">ÁREA RESTRITA</span><h2>Painel ADM</h2><p>Gerencie os conteúdos e acompanhe o Conecta.</p></div><button className="secondary" type="button" onClick={loadAdminData}><RefreshCw size={16} /> Atualizar</button></div>
+          <section className="card" style={{ padding: "16px", marginBottom: "16px" }}>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              {[ ["dashboard", "Dashboard"], ["users", "Usuários"], ["posts", "Publicações"], ["stories", "Stories"], ["moderation", "Moderação"] ].map(([key, label]) => <button key={key} type="button" className={adminTab === key ? "primary" : "secondary"} onClick={() => setAdminTab(key)}>{label}</button>)}
+            </div>
+          </section>
+          {adminTab === "dashboard" && <div className="grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "12px" }}>
+            {[["Usuários", adminCounts.users], ["Publicações", adminCounts.posts], ["Stories", adminCounts.stories]].map(([label, value]) => <section className="card" key={label} style={{ padding: "20px" }}><p className="muted" style={{ margin: 0 }}>{label}</p><h2 style={{ fontSize: "30px", margin: "8px 0 0" }}>{value}</h2></section>)}
+          </div>}
+          {adminTab === "users" && <section className="card" style={{ padding: "18px" }}><h3>Usuários cadastrados</h3>{adminUsers.length === 0 ? <p className="muted">Nenhum usuário encontrado ou acesso bloqueado.</p> : adminUsers.map(person => <div key={person.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: "1px solid #eee" }}><div><b>{person.display_name || "Usuário"}</b><div className="muted">@{person.username || "usuario"}</div></div><button className="secondary" type="button" onClick={() => openUserProfile(person.id)}>Ver perfil</button></div>)}</section>}
+          {adminTab === "posts" && <section className="card" style={{ padding: "18px" }}><h3>Publicações</h3>{adminPosts.length === 0 ? <p className="muted">Nenhuma publicação encontrada.</p> : adminPosts.map(post => { const author = adminUsers.find(person => person.id === post.user_id); return <article key={post.id} style={{ padding: "12px 0", borderBottom: "1px solid #eee" }}><b>{author?.display_name || "Usuário"} @{author?.username || ""}</b><p style={{ whiteSpace: "pre-wrap" }}>{post.content || "(Publicação com imagem)"}</p>{post.image_url && <a href={post.image_url} target="_blank" rel="noreferrer">Ver imagem</a>}<div><button className="secondary" type="button" style={{ color: "#b42318" }} onClick={() => adminDeletePost(post.id)}>Excluir publicação</button></div></article>; })}</section>}
+          {adminTab === "stories" && <section className="card" style={{ padding: "18px" }}><h3>Stories</h3>{adminStories.length === 0 ? <p className="muted">Nenhum Story encontrado.</p> : adminStories.map(story => { const author = adminUsers.find(person => person.id === story.user_id); return <article key={story.id} style={{ padding: "12px 0", borderBottom: "1px solid #eee" }}><b>{author?.display_name || "Usuário"} @{author?.username || ""}</b><p>{story.content || "(Story com imagem)"}</p>{story.image_url && <a href={story.image_url} target="_blank" rel="noreferrer">Ver imagem</a>}<div><button className="secondary" type="button" style={{ color: "#b42318" }} onClick={() => adminDeleteStory(story.id)}>Excluir Story</button></div></article>; })}</section>}
+          {adminTab === "moderation" && <section className="card" style={{ padding: "18px" }}><h3>Moderação</h3><p className="muted">O sistema de denúncias ainda não foi configurado. Por enquanto, você pode revisar e remover publicações e Stories nas abas correspondentes.</p></section>}
         </>}
         <footer>Conecta · Feito para aproximar pessoas.</footer>
       </main>

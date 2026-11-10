@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import {
   Heart, MessageCircle, Send, LogOut, UserRound, Home, Search,
-  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare
+  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare, Code2
 } from "lucide-react";
 
 function AuthScreen() {
@@ -519,7 +519,14 @@ function App() {
                 {profile?.avatar_url ? <img src={profile.avatar_url} alt="Foto do perfil" onError={event => { event.currentTarget.style.display = "none"; }} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}
               </div>
               <div style={{ minWidth: 0 }}>
-                <h2 style={{ margin: "0 0 4px" }}>{profile?.display_name || "Seu nome"}</h2>
+                <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap", marginBottom: "4px" }}>
+                  <h2 style={{ margin: 0 }}>{profile?.display_name || "Seu nome"}</h2>
+                  {profile?.username?.toLowerCase() === "usuario_7be4cd5a" && (
+                    <span title="Identificação de desenvolvedor" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "5px 10px", borderRadius: "999px", background: "#eaf2ff", color: "#2457a7", border: "1px solid #c9dcff", fontSize: "12px", fontWeight: 700, lineHeight: 1 }}>
+                      <Code2 size={14} /> Desenvolvedor
+                    </span>
+                  )}
+                </div>
                 <p className="muted" style={{ margin: "0 0 8px" }}>@{profile?.username || "usuario"}</p>
                 <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{profile?.bio || "Você ainda não adicionou uma biografia."}</p>
               </div>

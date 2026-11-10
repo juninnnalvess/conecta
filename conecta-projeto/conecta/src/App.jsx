@@ -76,6 +76,11 @@ function App() {
   const [friendships, setFriendships] = useState([]);
   const [friendProfilesById, setFriendProfilesById] = useState({});
   const [friendBusy, setFriendBusy] = useState(false);
+  const [selectedChatFriend, setSelectedChatFriend] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -301,6 +306,67 @@ function App() {
     setFriendBusy(false);
   }
 
+  async function loadChatMessages(friendId) {
+    const userId = session?.user?.id;
+    if (!userId || !friendId) return;
+
+    setChatLoading(true);
+    const [sent, received] = await Promise.all([
+      supabase.from("messages")
+        .select("id,sender_id,receiver_id,content,created_at")
+        .eq("sender_id", userId)
+        .eq("receiver_id", friendId)
+        .order("created_at", { ascending: true }),
+      supabase.from("messages")
+        .select("id,sender_id,receiver_id,content,created_at")
+        .eq("sender_id", friendId)
+        .eq("receiver_id", userId)
+        .order("created_at", { ascending: true })
+    ]);
+
+    const error = sent.error || received.error;
+    if (error) {
+      setNotice(error.message);
+      setChatLoading(false);
+      return;
+    }
+
+    const combined = [...(sent.data || []), ...(received.data || [])]
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    setChatMessages(combined);
+    setChatLoading(false);
+  }
+
+  async function openChat(friendId) {
+    const friend = friendProfilesById[friendId];
+    if (!friend) return;
+    setSelectedChatFriend(friend);
+    setChatMessages([]);
+    await loadChatMessages(friendId);
+  }
+
+  async function sendChatMessage(e) {
+    e.preventDefault();
+    const text = messageDraft.trim();
+    if (!text || !selectedChatFriend || sendingMessage) return;
+
+    setSendingMessage(true);
+    setNotice("");
+    const { error } = await supabase.from("messages").insert({
+      sender_id: session.user.id,
+      receiver_id: selectedChatFriend.id,
+      content: text
+    });
+
+    if (error) {
+      setNotice(error.message);
+    } else {
+      setMessageDraft("");
+      await loadChatMessages(selectedChatFriend.id);
+    }
+    setSendingMessage(false);
+  }
+
   async function createPost(e) {
     e.preventDefault();
     if (!content.trim() && !imageUrl.trim()) return;
@@ -458,6 +524,72 @@ function App() {
           <div style={{ marginTop: "14px", fontSize: "13px" }} className="muted">
             {friendships.filter(item => item.status === "accepted").length} amizade(s) aceita(s)
           </div>
+        </section>
+
+        <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
+          <h3 style={{ marginTop: 0 }}>Mensagens privadas</h3>
+          <p className="muted">Converse em particular com pessoas que já aceitaram sua amizade.</p>
+          {friendships.filter(item => item.status === "accepted").length === 0 ? (
+            <p className="muted">Quando você tiver amigos, poderá conversar com eles aqui.</p>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 0.8fr) minmax(0, 1.7fr)", gap: "14px" }}>
+              <div>
+                <h4 style={{ marginTop: 0 }}>Seus amigos</h4>
+                {friendships.filter(item => item.status === "accepted").map(item => {
+                  const friendId = item.requester_id === session.user.id ? item.receiver_id : item.requester_id;
+                  const friend = friendProfilesById[friendId];
+                  if (!friend) return null;
+                  const active = selectedChatFriend?.id === friendId;
+                  return <button
+                    key={item.id}
+                    type="button"
+                    className={active ? "primary" : "secondary"}
+                    onClick={() => openChat(friendId)}
+                    style={{ display: "block", width: "100%", textAlign: "left", marginBottom: "8px" }}
+                  >
+                    {friend.display_name || "Usuário Conecta"}
+                    <span style={{ display: "block", fontSize: "12px", opacity: 0.8 }}>@{friend.username || "usuario"}</span>
+                  </button>;
+                })}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                {selectedChatFriend ? (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                      <h4 style={{ marginTop: 0 }}>Conversa com {selectedChatFriend.display_name || "amigo"}</h4>
+                      <button type="button" className="secondary" onClick={() => loadChatMessages(selectedChatFriend.id)}>Atualizar</button>
+                    </div>
+                    <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", padding: "12px", minHeight: "180px", maxHeight: "320px", overflowY: "auto", marginBottom: "10px" }}>
+                      {chatLoading ? <p className="muted">Carregando mensagens…</p> : chatMessages.length === 0 ? <p className="muted">Esta conversa ainda não tem mensagens. Escreva a primeira!</p> : chatMessages.map(message => {
+                        const mine = message.sender_id === session.user.id;
+                        return <div key={message.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: "8px" }}>
+                          <div style={{ maxWidth: "85%", padding: "9px 12px", borderRadius: "12px", background: mine ? "#dbeafe" : "#f3f4f6", overflowWrap: "anywhere" }}>
+                            <div>{message.content}</div>
+                            <small style={{ display: "block", marginTop: "4px", opacity: 0.65, textAlign: "right" }}>{new Date(message.created_at).toLocaleString("pt-BR")}</small>
+                          </div>
+                        </div>;
+                      })}
+                    </div>
+                    <form onSubmit={sendChatMessage} style={{ display: "flex", gap: "8px" }}>
+                      <input
+                        value={messageDraft}
+                        onChange={event => setMessageDraft(event.target.value)}
+                        placeholder="Escreva uma mensagem…"
+                        aria-label="Escreva uma mensagem"
+                        disabled={sendingMessage}
+                        style={{ flex: 1, minWidth: 0 }}
+                      />
+                      <button className="primary" disabled={sendingMessage || !messageDraft.trim()}>{sendingMessage ? "Enviando…" : "Enviar"}</button>
+                    </form>
+                  </>
+                ) : (
+                  <div style={{ minHeight: "180px", display: "grid", placeItems: "center", border: "1px dashed #d1d5db", borderRadius: "10px", padding: "16px", textAlign: "center" }}>
+                    <p className="muted">Escolha um amigo à esquerda para abrir a conversa.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </section>
 
         <form className="composer card" onSubmit={createPost}>

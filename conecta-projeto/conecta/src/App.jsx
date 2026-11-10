@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import {
   Heart, MessageCircle, Send, LogOut, UserRound, Home, Search,
-  Image as ImageIcon, LoaderCircle, Users, RefreshCw
+  Image as ImageIcon, LoaderCircle, Users, RefreshCw, MessageSquare
 } from "lucide-react";
 
 function AuthScreen() {
@@ -480,6 +480,7 @@ function App() {
         <button type="button" className={`nav-item ${activePage === "feed" ? "selected" : ""}`} onClick={() => setActivePage("feed")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Home size={19} /> Feed</button>
         <button type="button" className={`nav-item ${activePage === "profile" ? "selected" : ""}`} onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserRound size={19} /> Meu perfil</button>
         <button type="button" className={`nav-item ${activePage === "community" ? "selected" : ""}`} onClick={() => setActivePage("community")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Users size={19} /> Comunidade</button>
+        <button type="button" className={`nav-item ${activePage === "messages" ? "selected" : ""}`} onClick={() => setActivePage("messages")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><MessageSquare size={19} /> Mensagem</button>
         <button type="button" className="profile-mini" onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}>
           <div className="avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="Sua foto" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}</div>
           <div><b>{profile?.display_name || "Meu perfil"}</b><small>@{profile?.username || "usuario"}</small></div>
@@ -551,7 +552,7 @@ function App() {
         </>}
 
         {activePage === "community" && <>
-          <div className="welcome"><div><span className="eyebrow">CONECTE-SE</span><h2>Comunidade</h2><p>Encontre pessoas, gerencie amizades e converse com seus amigos.</p></div><button className="icon-button" onClick={() => { loadFriendships(); }} title="Atualizar comunidade"><RefreshCw size={18} /></button></div>
+          <div className="welcome"><div><span className="eyebrow">CONECTE-SE</span><h2>Comunidade</h2><p>Encontre pessoas, envie solicitações e gerencie suas amizades.</p></div><button className="icon-button" onClick={() => { loadFriendships(); }} title="Atualizar comunidade"><RefreshCw size={18} /></button></div>
           <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
             <h3 style={{ marginTop: 0 }}>Encontrar pessoas</h3>
             <p className="muted">Pesquise pelo nome ou pelo nome de usuário para adicionar amigos.</p>
@@ -590,12 +591,17 @@ function App() {
               const friendId = item.requester_id === session.user.id ? item.receiver_id : item.requester_id;
               const friend = friendProfilesById[friendId];
               if (!friend) return null;
-              return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><b>{friend.display_name || "Usuário Conecta"}</b><div className="muted">@{friend.username || "usuario"}</div></div><button className="secondary" type="button" onClick={() => { setActivePage("community"); openChat(friendId); }}>Conversar</button></div>;
+              return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><b>{friend.display_name || "Usuário Conecta"}</b><div className="muted">@{friend.username || "usuario"}</div></div><button className="secondary" type="button" onClick={() => { setActivePage("messages"); openChat(friendId); }}>Conversar</button></div>;
             })}
           </section>
 
+
+        </>}
+
+        {activePage === "messages" && <>
+          <div className="welcome"><div><span className="eyebrow">CONVERSAS</span><h2>Mensagem</h2><p>Converse em particular com pessoas que já aceitaram sua amizade.</p></div><button className="icon-button" onClick={() => { loadFriendships(); if (selectedChatFriend) loadChatMessages(selectedChatFriend.id); }} title="Atualizar mensagens"><RefreshCw size={18} /></button></div>
           <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
-            <h3 style={{ marginTop: 0 }}>Mensagens privadas</h3>
+            <h3 style={{ marginTop: 0 }}>Mensagem</h3>
             <p className="muted">Converse em particular com pessoas que já aceitaram sua amizade.</p>
             {acceptedFriendships.length === 0 ? <p className="muted">Quando você tiver amigos, poderá conversar com eles aqui.</p> : (
               <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 0.8fr) minmax(0, 1.7fr)", gap: "14px" }}>

@@ -62,9 +62,14 @@ function AuthScreen() {
 
 function App() {
   const [session, setSession] = useState(null);
+  const [activePage, setActivePage] = useState("feed");
   const [loading, setLoading] = useState(true);
   const [posts, setPosts] = useState([]);
   const [profile, setProfile] = useState(null);
+  const [profileName, setProfileName] = useState("");
+  const [profileUsername, setProfileUsername] = useState("");
+  const [profileBio, setProfileBio] = useState("");
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState("");
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [commentDrafts, setCommentDrafts] = useState({});
@@ -114,6 +119,10 @@ function App() {
       .maybeSingle();
     if (error) setNotice(error.message);
     setProfile(data);
+    setProfileName(data?.display_name || "");
+    setProfileUsername(data?.username || "");
+    setProfileBio(data?.bio || "");
+    setProfileAvatarUrl(data?.avatar_url || "");
   }
 
   // Busca cada tabela separadamente para evitar relações ambíguas no Supabase.
@@ -414,18 +423,23 @@ function App() {
 
   async function saveProfile(e) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    setNotice("");
     const updates = {
-      display_name: String(form.get("display_name") || "").trim(),
-      username: String(form.get("username") || "").trim().replace(/^@/, ""),
-      bio: String(form.get("bio") || "").trim()
+      display_name: profileName.trim(),
+      username: profileUsername.trim().replace(/^@/, ""),
+      bio: profileBio.trim(),
+      avatar_url: profileAvatarUrl.trim() || null
     };
+    if (!updates.display_name) {
+      setNotice("Informe seu nome para salvar o perfil.");
+      return;
+    }
     const { error } = await supabase.from("profiles").update(updates).eq("id", session.user.id);
     if (error) {
       setNotice(error.message);
     } else {
-      setNotice("Perfil atualizado!");
-      loadProfile();
+      setNotice("Perfil atualizado com sucesso!");
+      await loadProfile();
     }
   }
 
@@ -451,174 +465,178 @@ function App() {
   if (loading) return <div className="center"><LoaderCircle className="spin" /> Carregando Conecta…</div>;
   if (!session) return <AuthScreen />;
 
+  const myPosts = posts.filter(post => post.user_id === session.user.id);
+  const acceptedFriendships = friendships.filter(item => item.status === "accepted");
+  const incomingRequests = friendships.filter(item => item.status === "pending" && item.receiver_id === session.user.id);
+
   return <div className="app-shell">
     <header className="topbar">
-      <a className="wordmark" href="#"><span className="brand-mark small">C</span> Conecta</a>
+      <a className="wordmark" href="#" onClick={event => { event.preventDefault(); setActivePage("feed"); }}><span className="brand-mark small">C</span> Conecta</a>
       <div className="searchbox"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Pesquisar no Conecta" /></div>
       <button className="icon-button" title="Sair" onClick={() => supabase.auth.signOut()}><LogOut size={19} /></button>
     </header>
     <div className="layout">
       <aside className="left-nav">
-        <div className="nav-item selected"><Home size={19} /> Feed</div>
-        <div className="nav-item"><UserRound size={19} /> Meu perfil</div>
-        <div className="nav-item"><Users size={19} /> Comunidade</div>
-        <div className="profile-mini"><div className="avatar">{(profile?.display_name || "C").slice(0, 1).toUpperCase()}</div><div><b>{profile?.display_name || "Meu perfil"}</b><small>@{profile?.username || "usuario"}</small></div></div>
+        <button type="button" className={`nav-item ${activePage === "feed" ? "selected" : ""}`} onClick={() => setActivePage("feed")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Home size={19} /> Feed</button>
+        <button type="button" className={`nav-item ${activePage === "profile" ? "selected" : ""}`} onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><UserRound size={19} /> Meu perfil</button>
+        <button type="button" className={`nav-item ${activePage === "community" ? "selected" : ""}`} onClick={() => setActivePage("community")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}><Users size={19} /> Comunidade</button>
+        <button type="button" className="profile-mini" onClick={() => setActivePage("profile")} style={{ border: 0, width: "100%", cursor: "pointer", textAlign: "left" }}>
+          <div className="avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="Sua foto" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}</div>
+          <div><b>{profile?.display_name || "Meu perfil"}</b><small>@{profile?.username || "usuario"}</small></div>
+        </button>
       </aside>
+
       <main className="feed">
-        <div className="welcome"><div><span className="eyebrow">SUA COMUNIDADE</span><h2>O que está acontecendo?</h2><p>Compartilhe uma ideia com sua rede.</p></div><button className="icon-button" onClick={loadPosts} title="Atualizar feed"><RefreshCw size={18} /></button></div>
+        {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
 
-        <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
-          <h3 style={{ marginTop: 0 }}>Encontrar pessoas</h3>
-          <p className="muted">Pesquise pelo nome ou pelo nome de usuário para adicionar amigos.</p>
-          <form onSubmit={searchPeople} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <input
-              value={peopleSearch}
-              onChange={event => setPeopleSearch(event.target.value)}
-              placeholder="Nome ou @usuário"
-              aria-label="Pesquisar pessoas"
-              style={{ flex: "1 1 220px", minWidth: 0 }}
-            />
-            <button className="secondary" disabled={friendBusy}>{friendBusy ? "Aguarde…" : "Buscar pessoas"}</button>
+        {activePage === "feed" && <>
+          <div className="welcome"><div><span className="eyebrow">SUA COMUNIDADE</span><h2>O que está acontecendo?</h2><p>Compartilhe uma ideia com sua rede.</p></div><button className="icon-button" onClick={loadPosts} title="Atualizar feed"><RefreshCw size={18} /></button></div>
+          <form className="composer card" onSubmit={createPost}>
+            <div className="composer-top"><div className="avatar">{(profile?.display_name || "C").slice(0, 1).toUpperCase()}</div><textarea value={content} onChange={e => setContent(e.target.value)} placeholder={`No que você está pensando, ${profile?.display_name || "amigo"}?`} rows={3} /></div>
+            <div className="composer-bottom"><label className="image-input"><ImageIcon size={18} /> <input value={imageUrl} onChange={e => setImageUrl(e.target.value)} placeholder="Cole o link de uma imagem (opcional)" /></label><button className="primary" disabled={busyPost}>{busyPost ? "Publicando…" : <><Send size={16} /> Publicar</>}</button></div>
           </form>
-
-          {friendships.some(item => item.status === "pending" && item.receiver_id === session.user.id) && <div style={{ marginTop: "18px" }}>
-            <h4>Pedidos recebidos</h4>
-            {friendships.filter(item => item.status === "pending" && item.receiver_id === session.user.id).map(item => {
-              const person = friendProfilesById[item.requester_id];
-              return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}>
-                <div><b>{person?.display_name || "Usuário Conecta"}</b><div className="muted">@{person?.username || "usuario"}</div></div>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button type="button" className="primary" disabled={friendBusy} onClick={() => respondToFriendRequest(item.id, "accepted")}>Aceitar</button>
-                  <button type="button" className="secondary" disabled={friendBusy} onClick={() => respondToFriendRequest(item.id, "rejected")}>Recusar</button>
-                </div>
-              </div>;
+          {visiblePosts.length === 0 ? <div className="empty card"><div className="empty-icon">✦</div><h3>Seu feed começa aqui</h3><p>Quando alguém publicar, as novidades vão aparecer nesta área.</p></div> :
+            visiblePosts.map(post => {
+              const liked = post.likes?.some(item => item.user_id === session.user.id);
+              return <article className="post card" key={post.id}>
+                <div className="post-head"><div className="avatar">{(post.profiles?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{post.profiles?.display_name || "Usuário Conecta"}</b><small>@{post.profiles?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></div>
+                {post.content && <p className="post-content">{post.content}</p>}
+                {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" onError={e => { e.currentTarget.style.display = "none"; }} />}
+                <div className="post-stats"><span>{post.likes?.length || 0} curtidas</span><span>{post.comments?.length || 0} comentários</span></div>
+                <div className="post-actions"><button className={liked ? "liked" : ""} onClick={() => toggleLike(post)}><Heart size={18} fill={liked ? "currentColor" : "none"} /> Curtir</button><button onClick={() => document.getElementById(`comment-${post.id}`)?.focus()}><MessageCircle size={18} /> Comentar</button></div>
+                {post.comments?.slice(-3).map(comment => <div className="comment" key={comment.id}><b>{comment.profiles?.display_name || "Usuário"} </b>{comment.content}</div>)}
+                <div className="comment-entry"><input id={`comment-${post.id}`} value={commentDrafts[post.id] || ""} onChange={e => setCommentDrafts(value => ({ ...value, [post.id]: e.target.value }))} placeholder="Escreva um comentário…" /><button onClick={() => addComment(post.id)} aria-label="Enviar comentário"><Send size={17} /></button></div>
+              </article>;
             })}
-          </div>}
+        </>}
 
-          {people.length > 0 && <div style={{ marginTop: "18px" }}>
-            <h4>Resultados da busca</h4>
-            {people.map(person => {
-              const relation = friendships.find(item =>
-                (item.requester_id === session.user.id && item.receiver_id === person.id) ||
-                (item.receiver_id === session.user.id && item.requester_id === person.id)
-              );
-              let action;
-              if (!relation) {
-                action = <button type="button" className="primary" disabled={friendBusy} onClick={() => sendFriendRequest(person.id)}>Adicionar amigo</button>;
-              } else if (relation.status === "accepted") {
-                action = <span className="muted">Vocês são amigos</span>;
-              } else if (relation.status === "pending" && relation.requester_id === session.user.id) {
-                action = <span className="muted">Solicitação enviada</span>;
-              } else if (relation.status === "pending") {
-                action = <span className="muted">Enviou um pedido para você</span>;
-              } else {
-                action = <span className="muted">Pedido encerrado</span>;
-              }
-              return <div key={person.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}>
-                <div><b>{person.display_name || "Usuário Conecta"}</b><div className="muted">@{person.username || "usuario"}</div></div>
-                {action}
-              </div>;
-            })}
-          </div>}
-
-          <div style={{ marginTop: "14px", fontSize: "13px" }} className="muted">
-            {friendships.filter(item => item.status === "accepted").length} amizade(s) aceita(s)
-          </div>
-        </section>
-
-        <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
-          <h3 style={{ marginTop: 0 }}>Mensagens privadas</h3>
-          <p className="muted">Converse em particular com pessoas que já aceitaram sua amizade.</p>
-          {friendships.filter(item => item.status === "accepted").length === 0 ? (
-            <p className="muted">Quando você tiver amigos, poderá conversar com eles aqui.</p>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 0.8fr) minmax(0, 1.7fr)", gap: "14px" }}>
-              <div>
-                <h4 style={{ marginTop: 0 }}>Seus amigos</h4>
-                {friendships.filter(item => item.status === "accepted").map(item => {
-                  const friendId = item.requester_id === session.user.id ? item.receiver_id : item.requester_id;
-                  const friend = friendProfilesById[friendId];
-                  if (!friend) return null;
-                  const active = selectedChatFriend?.id === friendId;
-                  return <button
-                    key={item.id}
-                    type="button"
-                    className={active ? "primary" : "secondary"}
-                    onClick={() => openChat(friendId)}
-                    style={{ display: "block", width: "100%", textAlign: "left", marginBottom: "8px" }}
-                  >
-                    {friend.display_name || "Usuário Conecta"}
-                    <span style={{ display: "block", fontSize: "12px", opacity: 0.8 }}>@{friend.username || "usuario"}</span>
-                  </button>;
-                })}
+        {activePage === "profile" && <>
+          <div className="welcome"><div><span className="eyebrow">SUA CONTA</span><h2>Meu perfil</h2><p>Veja suas informações, atualize seus dados e acompanhe suas publicações.</p></div><button className="icon-button" onClick={loadProfile} title="Atualizar perfil"><RefreshCw size={18} /></button></div>
+          <section className="card" style={{ padding: "22px", marginBottom: "18px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
+              <div className="avatar" style={{ width: "84px", height: "84px", fontSize: "30px", flexShrink: 0 }}>
+                {profile?.avatar_url ? <img src={profile.avatar_url} alt="Foto do perfil" onError={event => { event.currentTarget.style.display = "none"; }} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}
               </div>
               <div style={{ minWidth: 0 }}>
-                {selectedChatFriend ? (
-                  <>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-                      <h4 style={{ marginTop: 0 }}>Conversa com {selectedChatFriend.display_name || "amigo"}</h4>
-                      <button type="button" className="secondary" onClick={() => loadChatMessages(selectedChatFriend.id)}>Atualizar</button>
-                    </div>
+                <h2 style={{ margin: "0 0 4px" }}>{profile?.display_name || "Seu nome"}</h2>
+                <p className="muted" style={{ margin: "0 0 8px" }}>@{profile?.username || "usuario"}</p>
+                <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{profile?.bio || "Você ainda não adicionou uma biografia."}</p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "22px", flexWrap: "wrap", borderTop: "1px solid #e5e7eb", marginTop: "18px", paddingTop: "14px" }}>
+              <span><b>{myPosts.length}</b> publicação(ões)</span>
+              <span><b>{acceptedFriendships.length}</b> amizade(s)</span>
+            </div>
+          </section>
+
+          <section className="card" style={{ padding: "22px", marginBottom: "18px" }}>
+            <h3 style={{ marginTop: 0 }}>Editar perfil</h3>
+            <form onSubmit={saveProfile} className="profile-form">
+              <label>Nome<input name="display_name" value={profileName} onChange={event => setProfileName(event.target.value)} placeholder="Seu nome" maxLength={60} required /></label>
+              <label>Nome de usuário<input name="username" value={profileUsername} onChange={event => setProfileUsername(event.target.value)} placeholder="seu_usuario" maxLength={30} /></label>
+              <label>Biografia<textarea name="bio" value={profileBio} onChange={event => setProfileBio(event.target.value)} placeholder="Conte um pouco sobre você" rows={4} maxLength={300} /></label>
+              <label>Link da foto de perfil<input name="avatar_url" type="url" value={profileAvatarUrl} onChange={event => setProfileAvatarUrl(event.target.value)} placeholder="https://exemplo.com/minha-foto.jpg" /></label>
+              <p className="muted" style={{ fontSize: "12px", marginTop: 0 }}>Para a foto, use um link público de uma imagem. O envio direto de fotos do computador ainda será adicionado.</p>
+              <button className="primary full">Salvar alterações</button>
+            </form>
+          </section>
+
+          <div className="welcome"><div><span className="eyebrow">SUAS ATIVIDADES</span><h2>Minhas publicações</h2><p>Publicações que você compartilhou no Conecta.</p></div><button className="icon-button" onClick={loadPosts} title="Atualizar publicações"><RefreshCw size={18} /></button></div>
+          {myPosts.length === 0 ? <div className="empty card"><h3>Você ainda não publicou</h3><p>Volte ao Feed para compartilhar sua primeira ideia.</p><button className="secondary" onClick={() => setActivePage("feed")}>Ir para o Feed</button></div> : myPosts.map(post => <article className="post card" key={post.id}>
+            <div className="post-head"><div className="avatar">{(profile?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{profile?.display_name || "Você"}</b><small>@{profile?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></div>
+            {post.content && <p className="post-content">{post.content}</p>}
+            {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" />}
+            <div className="post-stats"><span>{post.likes?.length || 0} curtidas</span><span>{post.comments?.length || 0} comentários</span></div>
+          </article>)}
+        </>}
+
+        {activePage === "community" && <>
+          <div className="welcome"><div><span className="eyebrow">CONECTE-SE</span><h2>Comunidade</h2><p>Encontre pessoas, gerencie amizades e converse com seus amigos.</p></div><button className="icon-button" onClick={() => { loadFriendships(); }} title="Atualizar comunidade"><RefreshCw size={18} /></button></div>
+          <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
+            <h3 style={{ marginTop: 0 }}>Encontrar pessoas</h3>
+            <p className="muted">Pesquise pelo nome ou pelo nome de usuário para adicionar amigos.</p>
+            <form onSubmit={searchPeople} style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <input value={peopleSearch} onChange={event => setPeopleSearch(event.target.value)} placeholder="Nome ou @usuário" aria-label="Pesquisar pessoas" style={{ flex: "1 1 220px", minWidth: 0 }} />
+              <button className="secondary" disabled={friendBusy}>{friendBusy ? "Aguarde…" : "Buscar pessoas"}</button>
+            </form>
+            {incomingRequests.length > 0 && <div style={{ marginTop: "18px" }}>
+              <h4>Pedidos recebidos ({incomingRequests.length})</h4>
+              {incomingRequests.map(item => {
+                const person = friendProfilesById[item.requester_id];
+                return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+                  <div><b>{person?.display_name || "Usuário Conecta"}</b><div className="muted">@{person?.username || "usuario"}</div></div>
+                  <div style={{ display: "flex", gap: "8px" }}><button type="button" className="primary" disabled={friendBusy} onClick={() => respondToFriendRequest(item.id, "accepted")}>Aceitar</button><button type="button" className="secondary" disabled={friendBusy} onClick={() => respondToFriendRequest(item.id, "rejected")}>Recusar</button></div>
+                </div>;
+              })}
+            </div>}
+            {people.length > 0 && <div style={{ marginTop: "18px" }}>
+              <h4>Resultados da busca</h4>
+              {people.map(person => {
+                const relation = friendships.find(item => (item.requester_id === session.user.id && item.receiver_id === person.id) || (item.receiver_id === session.user.id && item.requester_id === person.id));
+                let action;
+                if (!relation) action = <button type="button" className="primary" disabled={friendBusy} onClick={() => sendFriendRequest(person.id)}>Adicionar amigo</button>;
+                else if (relation.status === "accepted") action = <span className="muted">Vocês são amigos</span>;
+                else if (relation.status === "pending" && relation.requester_id === session.user.id) action = <span className="muted">Solicitação enviada</span>;
+                else if (relation.status === "pending") action = <span className="muted">Enviou um pedido para você</span>;
+                else action = <span className="muted">Pedido encerrado</span>;
+                return <div key={person.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><b>{person.display_name || "Usuário Conecta"}</b><div className="muted">@{person.username || "usuario"}</div></div>{action}</div>;
+              })}
+            </div>}
+          </section>
+
+          <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
+            <h3 style={{ marginTop: 0 }}>Meus amigos ({acceptedFriendships.length})</h3>
+            {acceptedFriendships.length === 0 ? <p className="muted">Suas amizades aceitas aparecerão aqui.</p> : acceptedFriendships.map(item => {
+              const friendId = item.requester_id === session.user.id ? item.receiver_id : item.requester_id;
+              const friend = friendProfilesById[friendId];
+              if (!friend) return null;
+              return <div key={item.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 0", borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}><div><b>{friend.display_name || "Usuário Conecta"}</b><div className="muted">@{friend.username || "usuario"}</div></div><button className="secondary" type="button" onClick={() => { setActivePage("community"); openChat(friendId); }}>Conversar</button></div>;
+            })}
+          </section>
+
+          <section className="card" style={{ padding: "18px", marginBottom: "18px" }}>
+            <h3 style={{ marginTop: 0 }}>Mensagens privadas</h3>
+            <p className="muted">Converse em particular com pessoas que já aceitaram sua amizade.</p>
+            {acceptedFriendships.length === 0 ? <p className="muted">Quando você tiver amigos, poderá conversar com eles aqui.</p> : (
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(150px, 0.8fr) minmax(0, 1.7fr)", gap: "14px" }}>
+                <div><h4 style={{ marginTop: 0 }}>Seus amigos</h4>
+                  {acceptedFriendships.map(item => {
+                    const friendId = item.requester_id === session.user.id ? item.receiver_id : item.requester_id;
+                    const friend = friendProfilesById[friendId];
+                    if (!friend) return null;
+                    const active = selectedChatFriend?.id === friendId;
+                    return <button key={item.id} type="button" className={active ? "primary" : "secondary"} onClick={() => openChat(friendId)} style={{ display: "block", width: "100%", textAlign: "left", marginBottom: "8px" }}>{friend.display_name || "Usuário Conecta"}<span style={{ display: "block", fontSize: "12px", opacity: 0.8 }}>@{friend.username || "usuario"}</span></button>;
+                  })}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  {selectedChatFriend ? <>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}><h4 style={{ marginTop: 0 }}>Conversa com {selectedChatFriend.display_name || "amigo"}</h4><button type="button" className="secondary" onClick={() => loadChatMessages(selectedChatFriend.id)}>Atualizar</button></div>
                     <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", padding: "12px", minHeight: "180px", maxHeight: "320px", overflowY: "auto", marginBottom: "10px" }}>
                       {chatLoading ? <p className="muted">Carregando mensagens…</p> : chatMessages.length === 0 ? <p className="muted">Esta conversa ainda não tem mensagens. Escreva a primeira!</p> : chatMessages.map(message => {
                         const mine = message.sender_id === session.user.id;
-                        return <div key={message.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: "8px" }}>
-                          <div style={{ maxWidth: "85%", padding: "9px 12px", borderRadius: "12px", background: mine ? "#dbeafe" : "#f3f4f6", overflowWrap: "anywhere" }}>
-                            <div>{message.content}</div>
-                            <small style={{ display: "block", marginTop: "4px", opacity: 0.65, textAlign: "right" }}>{new Date(message.created_at).toLocaleString("pt-BR")}</small>
-                          </div>
-                        </div>;
+                        return <div key={message.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: "8px" }}><div style={{ maxWidth: "85%", padding: "9px 12px", borderRadius: "12px", background: mine ? "#dbeafe" : "#f3f4f6", overflowWrap: "anywhere" }}><div>{message.content}</div><small style={{ display: "block", marginTop: "4px", opacity: 0.65, textAlign: "right" }}>{new Date(message.created_at).toLocaleString("pt-BR")}</small></div></div>;
                       })}
                     </div>
-                    <form onSubmit={sendChatMessage} style={{ display: "flex", gap: "8px" }}>
-                      <input
-                        value={messageDraft}
-                        onChange={event => setMessageDraft(event.target.value)}
-                        placeholder="Escreva uma mensagem…"
-                        aria-label="Escreva uma mensagem"
-                        disabled={sendingMessage}
-                        style={{ flex: 1, minWidth: 0 }}
-                      />
-                      <button className="primary" disabled={sendingMessage || !messageDraft.trim()}>{sendingMessage ? "Enviando…" : "Enviar"}</button>
-                    </form>
-                  </>
-                ) : (
-                  <div style={{ minHeight: "180px", display: "grid", placeItems: "center", border: "1px dashed #d1d5db", borderRadius: "10px", padding: "16px", textAlign: "center" }}>
-                    <p className="muted">Escolha um amigo à esquerda para abrir a conversa.</p>
-                  </div>
-                )}
+                    <form onSubmit={sendChatMessage} style={{ display: "flex", gap: "8px" }}><input value={messageDraft} onChange={event => setMessageDraft(event.target.value)} placeholder="Escreva uma mensagem…" aria-label="Escreva uma mensagem" disabled={sendingMessage} style={{ flex: 1, minWidth: 0 }} /><button className="primary" disabled={sendingMessage || !messageDraft.trim()}>{sendingMessage ? "Enviando…" : "Enviar"}</button></form>
+                  </> : <div style={{ minHeight: "180px", display: "grid", placeItems: "center", border: "1px dashed #d1d5db", borderRadius: "10px", padding: "16px", textAlign: "center" }}><p className="muted">Escolha um amigo à esquerda para abrir a conversa.</p></div>}
+                </div>
               </div>
-            </div>
-          )}
-        </section>
-
-        <form className="composer card" onSubmit={createPost}>
-          <div className="composer-top"><div className="avatar">{(profile?.display_name || "C").slice(0, 1).toUpperCase()}</div><textarea value={content} onChange={e => setContent(e.target.value)} placeholder={`No que você está pensando, ${profile?.display_name || "amigo"}?`} rows={3} /></div>
-          <div className="composer-bottom"><label className="image-input"><ImageIcon size={18} /> <input value={imageUrl} onChange={e => setImageUrl(e.target.value)} placeholder="Cole o link de uma imagem (opcional)" /></label><button className="primary" disabled={busyPost}>{busyPost ? "Publicando…" : <><Send size={16} /> Publicar</>}</button></div>
-        </form>
-        {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>×</button></div>}
-        {visiblePosts.length === 0 ? <div className="empty card"><div className="empty-icon">✦</div><h3>Seu feed começa aqui</h3><p>Quando alguém publicar, as novidades vão aparecer nesta área.</p></div> :
-          visiblePosts.map(post => {
-            const liked = post.likes?.some(item => item.user_id === session.user.id);
-            return <article className="post card" key={post.id}>
-              <div className="post-head"><div className="avatar">{(post.profiles?.display_name || "?").slice(0, 1).toUpperCase()}</div><div className="post-author"><b>{post.profiles?.display_name || "Usuário Conecta"}</b><small>@{post.profiles?.username || "usuario"} · {new Date(post.created_at).toLocaleString("pt-BR")}</small></div></div>
-              {post.content && <p className="post-content">{post.content}</p>}
-              {post.image_url && <img className="post-image" src={post.image_url} alt="Imagem da publicação" onError={e => { e.currentTarget.style.display = "none"; }} />}
-              <div className="post-stats"><span>{post.likes?.length || 0} curtidas</span><span>{post.comments?.length || 0} comentários</span></div>
-              <div className="post-actions"><button className={liked ? "liked" : ""} onClick={() => toggleLike(post)}><Heart size={18} fill={liked ? "currentColor" : "none"} /> Curtir</button><button onClick={() => document.getElementById(`comment-${post.id}`)?.focus()}><MessageCircle size={18} /> Comentar</button></div>
-              {post.comments?.slice(-3).map(comment => <div className="comment" key={comment.id}><b>{comment.profiles?.display_name || "Usuário"} </b>{comment.content}</div>)}
-              <div className="comment-entry"><input id={`comment-${post.id}`} value={commentDrafts[post.id] || ""} onChange={e => setCommentDrafts(value => ({ ...value, [post.id]: e.target.value }))} placeholder="Escreva um comentário…" /><button onClick={() => addComment(post.id)} aria-label="Enviar comentário"><Send size={17} /></button></div>
-            </article>;
-          })}
+            )}
+          </section>
+        </>}
         <footer>Conecta · Feito para aproximar pessoas.</footer>
       </main>
+
       <aside className="right-panel">
-        <section className="side-card"><h3>Seu espaço</h3><p>Complete seu perfil para que as pessoas conheçam você.</p><form onSubmit={saveProfile} className="profile-form">
-          <label>Nome<input name="display_name" defaultValue={profile?.display_name || ""} placeholder="Seu nome" /></label>
-          <label>Usuário<input name="username" defaultValue={profile?.username || ""} placeholder="seu_usuario" /></label>
-          <label>Biografia<textarea name="bio" defaultValue={profile?.bio || ""} placeholder="Conte um pouco sobre você" rows={3} /></label>
-          <button className="secondary full">Salvar perfil</button>
-        </form></section>
+        <section className="side-card">
+          <h3>Seu espaço</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+            <div className="avatar">{profile?.avatar_url ? <img src={profile.avatar_url} alt="Sua foto" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} /> : (profile?.display_name || "C").slice(0, 1).toUpperCase()}</div>
+            <div><b>{profile?.display_name || "Meu perfil"}</b><small style={{ display: "block" }}>@{profile?.username || "usuario"}</small></div>
+          </div>
+          <button type="button" className="secondary full" onClick={() => setActivePage("profile")}>Abrir meu perfil</button>
+          <p className="muted" style={{ marginBottom: 0 }}>Mantenha suas informações atualizadas para que seus amigos conheçam você.</p>
+        </section>
         <section className="side-card tips"><h3>Bem-vindo ao Conecta</h3><p>Publique, curta e converse. Sua comunidade começa com uma conexão.</p></section>
       </aside>
     </div>

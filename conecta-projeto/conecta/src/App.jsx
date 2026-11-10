@@ -1,96 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
-import { supabase, isSupabaseConfigured } from "./supabase";
-import {
-  Heart, MessageCircle, Send, LogOut, UserRound, Home, Search,
-  Image as ImageIcon, LoaderCircle, Users, RefreshCw
-} from "lucide-react";
+    const userIds = [...new Set(rows.flatMap(post => [
+      post.user_id,
+      ...(post.comments || []).map(comment => comment.user_id)
+    ]).filter(Boolean))];
 
-function AuthScreen() {
-  const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+    let profilesById = {};
+    if (userIds.length) {
+      const { data: profileRows, error: profileError } = await supabase
+        .from("profiles")
+        .select("id,display_name,username,avatar_url")
+        .in("id", userIds);
 
-  async function submit(e) {
-    e.preventDefault();
-    setBusy(true); setMessage("");
-    try {
-      if (mode === "signup") {
-        const { data, error } = await supabase.auth.signUp({
-          email, password, options: { data: { display_name: name.trim() || "Novo usuário" } }
-        });
-        if (error) throw error;
-        setMessage(data.session
-          ? "Conta criada! Você já pode entrar."
-          : "Conta criada. Confira seu e-mail para confirmar o cadastro antes de entrar.");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      }
-    } catch (err) { setMessage(err.message || "Não foi possível concluir."); }
-    finally { setBusy(false); }
-  }
+      if (profileError) { setNotice(profileError.message); return; }
+      profilesById = Object.fromEntries((profileRows || []).map(profile => [profile.id, profile]));
+    }
 
-  return <main className="auth-wrap">
-    <section className="auth-card">
-      <div className="brand-mark">C</div>
-      <h1>Conecta</h1>
-      <p className="muted">Pessoas, ideias e momentos.</p>
-      <div className="tabs">
-        <button className={mode === "login" ? "active" : ""} onClick={() => {setMode("login");setMessage("");}}>Entrar</button>
-        <button className={mode === "signup" ? "active" : ""} onClick={() => {setMode("signup");setMessage("");}}>Criar conta</button>
-      </div>
-      <form onSubmit={submit}>
-        {mode === "signup" && <label>Como podemos te chamar?<input value={name} onChange={e=>setName(e.target.value)} placeholder="Seu nome" maxLength={60}/></label>}
-        <label>E-mail<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="voce@email.com" required autoComplete="email"/></label>
-        <label>Senha<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Mínimo de 6 caracteres" minLength={6} required autoComplete={mode==="login"?"current-password":"new-password"}/></label>
-        <button className="primary full" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18}/> : mode==="login" ? "Entrar no Conecta" : "Criar minha conta"}</button>
-      </form>
-      {message && <p className="notice">{message}</p>}
-      <p className="tiny">Ao continuar, você concorda em usar o Conecta de forma respeitosa.</p>
-    </section>
-  </main>;
-}
-
-function App() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [posts, setPosts] = useState([]);
-  const [profile, setProfile] = useState(null);
-  const [content, setContent] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [commentDrafts, setCommentDrafts] = useState({});
-  const [commentsByPost, setCommentsByPost] = useState({});
-  const [busyPost, setBusyPost] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    if (!isSupabaseConfigured) { setLoading(false); return; }
-    supabase.auth.getSession().then(({data}) => { setSession(data.session); setLoading(false); });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (session?.user) { loadProfile(); loadPosts(); }
-    else { setPosts([]); setProfile(null); }
-  }, [session?.user?.id]);
-
-  async function loadProfile() {
-    const { data, error } = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
-    if (error) setNotice(error.message);
-    setProfile(data);
-  }
-
-  async function loadPosts() {
-    const { data, error } = await supabase.from("posts")
-      .select("id,user_id,content,image_url,created_at,profiles(id,display_name,username,avatar_url),likes(user_id),comments(id,user_id,content,created_at,profiles(display_name,username))")
-      .order("created_at", { ascending: false }).limit(50);
-    if (error) { setNotice(error.message); return; }
-    setPosts(data || []);
+    setPosts(rows.map(post => ({
+      ...post,
+      profiles: profilesById[post.user_id] || null,
+      comments: (post.comments || []).map(comment => ({
+        ...comment,
+        profiles: profilesById[comment.user_id] || null
+      }))
+    })));
   }
 
   async function createPost(e) {
@@ -195,12 +126,3 @@ function App() {
       </main>
       <aside className="right-panel"><section className="side-card"><h3>Seu espaço</h3><p>Complete seu perfil para que as pessoas conheçam você.</p><form onSubmit={saveProfile} className="profile-form">
         <label>Nome<input name="display_name" defaultValue={profile?.display_name || ""} placeholder="Seu nome"/></label>
-        <label>Usuário<input name="username" defaultValue={profile?.username || ""} placeholder="seu_usuario"/></label>
-        <label>Biografia<textarea name="bio" defaultValue={profile?.bio || ""} placeholder="Conte um pouco sobre você" rows={3}/></label>
-        <button className="secondary full">Salvar perfil</button>
-      </form></section><section className="side-card tips"><h3>Bem-vindo ao Conecta</h3><p>Publique, curta e converse. Sua comunidade começa com uma conexão.</p></section></aside>
-    </div>
-  </div>;
-}
-
-export default App;

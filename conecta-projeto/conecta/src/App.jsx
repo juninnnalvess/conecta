@@ -247,6 +247,58 @@ function App() {
     }
   }, [session?.user?.id]);
 
+  // Recebe mensagens novas sem precisar atualizar a página.
+  useEffect(() => {
+    const userId = session?.user?.id;
+    const friendId = selectedChatFriend?.id;
+
+    if (!userId || !friendId) return;
+
+    const channel = supabase
+      .channel(`mensagens-${userId}-${friendId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages"
+        },
+        (payload) => {
+          const message = payload.new;
+
+          const belongsToConversation =
+            (message.sender_id === userId &&
+              message.receiver_id === friendId) ||
+            (message.sender_id === friendId &&
+              message.receiver_id === userId);
+
+          if (belongsToConversation) {
+            setChatMessages(current => {
+              if (current.some(item => item.id === message.id)) {
+                return current;
+              }
+
+              return [...current, message].sort(
+                (a, b) =>
+                  new Date(a.created_at) - new Date(b.created_at)
+              );
+            });
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setNotice(
+            "A conexão em tempo real caiu. Verifique a publicação supabase_realtime e as permissões de leitura da tabela messages."
+          );
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id, selectedChatFriend?.id]);
+
   async function loadProfile() {
     const { data, error } = await supabase
       .from("profiles")
@@ -861,41 +913,7 @@ function App() {
     if (!userId || !friendId) return;
 
 
-  useEffect(() => {
-    const userId = session?.user?.id;
-    const friendId = selectedChatFriend?.id;
 
-    if (!userId || !friendId) return;
-
-    const channel = supabase
-      .channel(`mensagens-${userId}-${friendId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages"
-        },
-        (payload) => {
-          const message = payload.new;
-
-          const belongsToConversation =
-            (message.sender_id === userId &&
-              message.receiver_id === friendId) ||
-            (message.sender_id === friendId &&
-              message.receiver_id === userId);
-
-          if (belongsToConversation) {
-            loadChatMessages(friendId);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [session?.user?.id, selectedChatFriend?.id]);
 
     
     setChatLoading(true);
